@@ -9,5 +9,8 @@ class BingeCloudPlugin : Plugin() {
     override fun load(context: Context) {
         registerMainAPI(VegaMoviesProvider())
         registerExtractorAPI(VCloud())
+        registerExtractorAPI(VDrive())
+        registerExtractorAPI(GDirect())
+        registerExtractorAPI(Filepress())
     }
 }
