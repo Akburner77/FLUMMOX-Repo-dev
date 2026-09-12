@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.flummox.bingecloud"
-    compileSdk = 34
+    compileSdk = 35
     defaultConfig {
         minSdk = 21
     }
@@ -29,6 +29,6 @@ cloudstream {
 
 dependencies {
     implementation("com.github.recloudstream:cloudstream:-SNAPSHOT")
-    implementation("org.jsoup:jsoup:1.17.2")
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
