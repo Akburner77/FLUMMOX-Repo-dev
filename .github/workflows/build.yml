@@ -1,24 +1,56 @@
-name: Build
+name: Build & Publish
 on:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - uses: actions/checkout@v4
+        with:
+          ref: builds
+          path: builds
+
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+
       - uses: android-actions/setup-android@v3
+
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build
-        run: gradle build
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: plugins
-          path: '**/build/outputs/**/*.cs3'
+
+      - name: Clean old .cs3
+        run: rm -f builds/*.cs3
+
+      - name: Build plugins
+        working-directory: src
+        run: gradle make
+
+      - name: Generate plugins.json
+        working-directory: src
+        run: gradle makePluginsJson
+
+      - name: Copy artifacts to builds
+        run: |
+          find src -name "*.cs3" -exec cp {} builds/ \;
+          find src -name "plugins.json" -exec cp {} builds/ \;
+
+      - name: Push to builds branch
+        working-directory: builds
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Build $(date +%s)" || echo "no changes"
+          git push origin builds --force
