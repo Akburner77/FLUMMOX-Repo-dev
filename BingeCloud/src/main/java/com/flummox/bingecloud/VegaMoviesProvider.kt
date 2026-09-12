@@ -7,7 +7,6 @@ import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbUrl
 import com.lagradost.api.Log
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import java.net.URI
@@ -39,7 +38,6 @@ data class VegaDocument(
     val permalink: String, val post_thumbnail: String
 )
 
-// A single playable link: quality + mirror + url
 data class MirrorLink(
     val quality: String,
     val size: String,
@@ -51,46 +49,43 @@ open class VegaMoviesProvider : MainAPI() {
     override var mainUrl = "https://vegamovies.mq"
     override var name = "BingeCloud"
     override val hasMainPage = true
-    override var lang = "hi"
+    override var lang = "en"
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val cinemetaUrl = "https://v3-cinemeta.strem.io/meta"
+    private var domainResolved = false
 
-    init {
-        runBlocking {
-            basemainUrl?.let { mainUrl = it }
-        }
-    }
-
-    companion object {
-        val basemainUrl: String? by lazy {
-            runBlocking {
-                try {
-                    val response = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json")
-                    val jsonObject = JSONObject(response.text)
-                    jsonObject.optString("vegamovies")
-                } catch (e: Exception) {
-                    null
-                }
+    private suspend fun ensureDomain() {
+        if (domainResolved) return
+        try {
+            val res = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json")
+            val json = JSONObject(res.text)
+            val live = json.optString("vegamovies").trim()
+            if (live.startsWith("http")) {
+                mainUrl = live
             }
+            domainResolved = true
+        } catch (e: Exception) {
+            Log.e("BingeCloud", "Domain resolution failed: ${e.message}")
         }
     }
 
     override val mainPage = mainPageOf(
-        "$mainUrl/page/%d/" to "Home",
-        "$mainUrl/category/web-series/netflix/page/%d/" to "Netflix",
-        "$mainUrl/category/web-series/disney-plus-hotstar/page/%d/" to "Disney+ Hotstar",
-        "$mainUrl/category/web-series/amazon-prime-video/page/%d/" to "Amazon Prime",
-        "$mainUrl/category/web-series/mx-original/page/%d/" to "MX Original",
-        "$mainUrl/category/anime-series/page/%d/" to "Anime Series",
-        "$mainUrl/category/korean-series/page/%d/" to "Korean Series"
+        "page/%d/" to "Home",
+        "category/web-series/netflix/page/%d/" to "Netflix",
+        "category/web-series/disney-plus-hotstar/page/%d/" to "Disney+ Hotstar",
+        "category/web-series/amazon-prime-video/page/%d/" to "Amazon Prime",
+        "category/anime-series/page/%d/" to "Anime",
+        "category/korean-series/page/%d/" to "Korean"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data.format(page)).document
-        val home = document.select("div.movies-grid > a").mapNotNull { it.toSearchResult() }
-        return newHomePageResponse(request.name, home)
+        ensureDomain()
+        val url = "$mainUrl/${request.data.format(page)}"
+        val document = app.get(url).document
+        val items = document.select("div.movies-grid > a").mapNotNull { it.toSearchResult() }
+        return newHomePageResponse(request.name, items)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -104,6 +99,7 @@ open class VegaMoviesProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
+        ensureDomain()
         val json = app.get("$mainUrl/search.php?q=$query").text
         val response = tryParseJson<VegaSearchResponse>(json) ?: return null
         return response.hits.map { hit ->
@@ -119,7 +115,9 @@ open class VegaMoviesProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(fixUrl(url)).document
+        ensureDomain()
+        val fullUrl = if (url.startsWith("http")) url else "$mainUrl$url"
+        val document = app.get(fullUrl).document
         var title = document.select("title").text().replace("Download ", "")
         var posterUrl = document.select("p > img").attr("src")
         val imdbUrl = document.select("a[href*=\"imdb\"]").attr("href")
@@ -175,8 +173,6 @@ open class VegaMoviesProvider : MainAPI() {
                     header.select("a")
                 }
 
-                // The old code only found V-Cloud. Now we find the "Download" button
-                // which leads to the nexdrive.fit page with ALL mirrors.
                 val downloadLink = links.firstOrNull {
                     it.text().contains("Download", true) || it.text().contains("Episode", true)
                 } ?: links.firstOrNull { it.text().contains("V-Cloud", true) }
@@ -209,13 +205,10 @@ open class VegaMoviesProvider : MainAPI() {
                 this.year = year.toIntOrNull()
                 this.backgroundPosterUrl = background
                 addActors(cast)
-                if (imdbId.isNotEmpty()) addImdbUrl(imdbUrl)
             }
         } else {
-            // For movies: capture ALL qualities and ALL mirrors
             val allMirrors = mutableListOf<MirrorLink>()
 
-            // Find every quality header (480p, 720p, 1080p, etc.)
             val qualityHeaders = document.select(
                 "main > h3, main > h5, main > h4"
             ).filter {
@@ -245,7 +238,6 @@ open class VegaMoviesProvider : MainAPI() {
                 allMirrors.addAll(mirrors)
             }
 
-            // Fallback: if no quality headers found, try the old direct button approach
             if (allMirrors.isEmpty()) {
                 val buttons = document.select("a:has(button.dwd-button)")
                 for (button in buttons) {
@@ -255,9 +247,6 @@ open class VegaMoviesProvider : MainAPI() {
                 }
             }
 
-            Log.d("BingeCloud", "Total mirrors found: ${allMirrors.size}")
-            allMirrors.forEach { Log.d("BingeCloud", "Mirror: ${it.mirror} | ${it.quality} | ${it.url}") }
-
             newMovieLoadResponse(title, url, TvType.Movie, allMirrors) {
                 this.posterUrl = posterUrl
                 this.plot = description
@@ -266,15 +255,10 @@ open class VegaMoviesProvider : MainAPI() {
                 this.year = year.toIntOrNull()
                 this.backgroundPosterUrl = background
                 addActors(cast)
-                if (imdbId.isNotEmpty()) addImdbUrl(imdbUrl)
             }
         }
     }
 
-    /**
-     * Given a download button URL (typically nexdrive.fit), fetch the page
-     * and extract ALL mirror buttons: V-Cloud, V-Drive [Multi], G-Direct, Filepress.
-     */
     private suspend fun fetchMirrorsFromDownloadPage(
         downloadUrl: String,
         quality: String,
@@ -283,10 +267,6 @@ open class VegaMoviesProvider : MainAPI() {
         val mirrors = mutableListOf<MirrorLink>()
         try {
             val doc = app.get(fixUrl(downloadUrl)).document
-            Log.d("BingeCloud", "Fetching mirrors from: $downloadUrl")
-            Log.d("BingeCloud", "Page title: ${doc.title()}")
-
-            // Find every anchor on the page
             val anchors = doc.select("a")
 
             for (a in anchors) {
@@ -295,41 +275,18 @@ open class VegaMoviesProvider : MainAPI() {
                 if (href.isEmpty() || href.startsWith("#")) continue
 
                 when {
-                    href.contains("vcloud", true) || text.contains("V-Cloud", true) -> {
+                    href.contains("vcloud", true) || text.contains("V-Cloud", true) ->
                         mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
-                    }
-                    href.contains("vdrive", true) || text.contains("V-Drive", true) -> {
+                    href.contains("vdrive", true) || text.contains("V-Drive", true) ->
                         mirrors.add(MirrorLink(quality, size, "V-Drive", href))
-                    }
-                    href.contains("gdirect", true) || text.contains("G-Direct", true) -> {
+                    href.contains("gdirect", true) || text.contains("G-Direct", true) ->
                         mirrors.add(MirrorLink(quality, size, "G-Direct", href))
-                    }
-                    href.contains("filepress", true) || text.contains("Filepress", true) -> {
+                    href.contains("filepress", true) || text.contains("Filepress", true) ->
                         mirrors.add(MirrorLink(quality, size, "Filepress", href))
-                    }
-                    href.contains("gdflix", true) || text.contains("GDFlix", true) -> {
+                    href.contains("gdflix", true) || text.contains("GDFlix", true) ->
                         mirrors.add(MirrorLink(quality, size, "GDFlix", href))
-                    }
                 }
             }
-
-            // Also check <p> tags containing anchors (common on these pages)
-            val pAnchors = doc.select("p > a")
-            for (a in pAnchors) {
-                val href = a.attr("href").trim()
-                if (href.isEmpty()) continue
-                val text = a.text().trim()
-                if (mirrors.any { it.url == href }) continue
-
-                when {
-                    href.contains("vcloud", true) -> mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
-                    href.contains("vdrive", true) -> mirrors.add(MirrorLink(quality, size, "V-Drive", href))
-                    href.contains("gdirect", true) -> mirrors.add(MirrorLink(quality, size, "G-Direct", href))
-                    href.contains("filepress", true) -> mirrors.add(MirrorLink(quality, size, "Filepress", href))
-                    href.contains("gdflix", true) -> mirrors.add(MirrorLink(quality, size, "GDFlix", href))
-                }
-            }
-
         } catch (e: Exception) {
             Log.e("BingeCloud", "fetchMirrors error: ${e.message}")
         }
@@ -337,13 +294,11 @@ open class VegaMoviesProvider : MainAPI() {
     }
 
     private fun extractQualityFromHeader(header: String): String {
-        val match = Regex("""(\d{3,4}[pP])""").find(header)
-        return match?.value ?: "Unknown"
+        return Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "Unknown"
     }
 
     private fun extractSizeFromHeader(header: String): String {
-        val match = Regex("""\[([^\]]*(?:MB|GB)[^\]]*)\]""").find(header)
-        return match?.groupValues?.getOrNull(1) ?: ""
+        return Regex("""\[([^\]]*(?:MB|GB)[^\]]*)\]""").find(header)?.groupValues?.getOrNull(1) ?: ""
     }
 
     override suspend fun loadLinks(
@@ -359,31 +314,21 @@ open class VegaMoviesProvider : MainAPI() {
             return false
         }
 
-        Log.d("BingeCloud", "loadLinks received ${mirrors.size} mirrors")
-
         for (mirror in mirrors) {
-            Log.d("BingeCloud", "Processing: ${mirror.mirror} ${mirror.quality} ${mirror.url}")
             try {
                 when {
-                    mirror.url.contains("vcloud", true) -> {
+                    mirror.url.contains("vcloud", true) ->
                         VCloud().getUrl(mirror.url, "", subtitleCallback, callback)
-                    }
-                    mirror.url.contains("vdrive", true) -> {
+                    mirror.url.contains("vdrive", true) ->
                         VDrive().getUrl(mirror.url, "", subtitleCallback, callback)
-                    }
-                    mirror.url.contains("gdirect", true) -> {
+                    mirror.url.contains("gdirect", true) ->
                         GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
-                    }
-                    mirror.url.contains("filepress", true) ||
-                    mirror.url.contains("gdflix", true) -> {
+                    mirror.url.contains("filepress", true) || mirror.url.contains("gdflix", true) ->
                         Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
-                    }
-                    else -> {
-                        loadExtractor(mirror.url, "", subtitleCallback, callback)
-                    }
+                    else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
                 }
             } catch (e: Exception) {
-                Log.e("BingeCloud", "Mirror ${mirror.mirror} failed: ${e.message}")
+                Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
             }
         }
         return true
