@@ -149,43 +149,45 @@ open class VegaMoviesProvider : MainAPI() {
         }
 
         return if (isSeries) {
-            val episodes = mutableListOf<Episode>()
-            val seasonHeaders = document.select(
-                "main > h3:matches((?i)(4K|[0-9]*0p)),main > h5:matches((?i)(4K|[0-9]*0p))"
-            ).filter { !it.text().contains("Zip", true) }
+    val episodes = mutableListOf<Episode>()
+    val seasonHeaders = document.select(
+        "h3, h4, h5"
+    ).filter {
+        val t = it.text()
+        (t.contains(Regex("""(?:Season|S)\s*\d+""", RegexOption.IGNORE_CASE)) ||
+         t.contains("Complete", true)) &&
+        !t.contains("Zip", true)
+    }
 
-            val episodesMap: MutableMap<Pair<Int, Int>, MutableList<MirrorLink>> = mutableMapOf()
+    // Aggregate: one entry per season, containing all quality mirrors
+    val seasonMirrorsMap: MutableMap<Int, MutableList<MirrorLink>> = mutableMapOf()
 
-            for (header in seasonHeaders) {
-                val headerText = header.text()
-                val seasonMatch = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE).find(headerText)
-                val season = seasonMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-                val quality = extractQualityFromHeader(headerText)
+    for (header in seasonHeaders) {
+        val headerText = header.text()
+        val seasonMatch = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE).find(headerText)
+        val season = seasonMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
+        val quality = extractQualityFromHeader(headerText)
+        val size = extractSizeFromHeader(headerText)
 
-                val nextEl = header.nextElementSibling()
-                val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else header.select("a")
+        val nextEl = header.nextElementSibling()
+        val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else header.select("a")
 
-                val downloadLink = links.firstOrNull {
-                    it.text().contains("Download", true) || it.text().contains("Episode", true)
-                } ?: links.firstOrNull { it.text().contains("V-Cloud", true) }
-                ?: links.firstOrNull { it.text().contains("G-Direct", true) }
-                ?: continue
+        val downloadLink = links.firstOrNull {
+            it.text().contains("Download", true) || it.text().contains("V-Cloud", true)
+        } ?: continue
 
-                val mirrorLinks = fetchMirrorsFromDownloadPage(downloadLink.attr("href"), quality)
-                mirrorLinks.forEach { mirrorLink ->
-                    val episodeNumber = episodesMap.keys.count { it.first == season } + 1
-                    val key = Pair(season, episodeNumber)
-                    episodesMap.getOrPut(key) { mutableListOf() }.add(mirrorLink)
-                }
-            }
+        val mirrors = fetchMirrorsFromDownloadPage(downloadLink.attr("href"), quality, size)
+        seasonMirrorsMap.getOrPut(season) { mutableListOf() }.addAll(mirrors)
+    }
 
-            for ((key, mirrors) in episodesMap) {
-                episodes.add(newEpisode(mirrors) {
-                    this.name = "S${key.first} E${key.second}"
-                    this.season = key.first
-                    this.episode = key.second
-                })
-            }
+    // One CloudStream episode per season — no fake episode numbering
+    for ((season, mirrors) in seasonMirrorsMap) {
+        episodes.add(newEpisode(mirrors) {
+            this.name = "Season $season (Complete)"
+            this.season = season
+            this.episode = 1
+        })
+    }
 
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = posterUrl
