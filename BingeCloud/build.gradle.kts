@@ -27,11 +27,11 @@ kotlin {
 }
 
 cloudstream {
-    description = "BingeCloud - Movies & TV Series"
+    description = "BingeCloud - VegaMovies provider"
     authors = listOf("FlummoxGamer")
     status = 1
-    tvTypes = listOf("Movie", "TvSeries")
-    language = "en"
+    tvTypes = listOf("Movie", "TvSeries", "AsianDrama", "Anime")
+    language = "hi"
 }
 
 dependencies {
@@ -40,5 +40,5 @@ dependencies {
     implementation("com.github.Blatzar:NiceHttp:0.4.11")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.13")
 }
