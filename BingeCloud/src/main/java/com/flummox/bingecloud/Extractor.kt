@@ -5,6 +5,7 @@ import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import java.net.URI
+import java.net.URLDecoder
 
 fun base64Decode(str: String): String {
     return try {
@@ -25,11 +26,11 @@ fun getBaseUrl(url: String): String {
 fun getIndexQuality(str: String?): Int {
     if (str.isNullOrBlank()) return Qualities.Unknown.value
     Regex("""(\d{3,4})[pP]""").find(str)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
-    val lowerStr = str.lowercase()
+    val lower = str.lowercase()
     return when {
-        lowerStr.contains("8k") -> 4320
-        lowerStr.contains("4k") -> 2160
-        lowerStr.contains("2k") -> 1440
+        lower.contains("8k") -> 4320
+        lower.contains("4k") -> 2160
+        lower.contains("2k") -> 1440
         else -> Qualities.Unknown.value
     }
 }
@@ -44,6 +45,31 @@ suspend fun getLatestBaseUrl(baseUrl: String, source: String): String {
     }
 }
 
+suspend fun resolveFinalUrl(startUrl: String): String? {
+    var currentUrl = startUrl
+    var loopCount = 0
+    val maxRedirects = 7
+    while (loopCount < maxRedirects) {
+        try {
+            val res = app.head(currentUrl, allowRedirects = false, timeout = 2500L)
+            if (res.code == 200 || res.code in 300..399) {
+                val location = res.headers["Location"]
+                if (location.isNullOrEmpty()) break
+                currentUrl = location
+            } else {
+                return null
+            }
+            loopCount++
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    return currentUrl
+}
+
+// ─────────────────────────────────────────────────────────
+// V-CLOUD EXTRACTOR (existing, works)
+// ─────────────────────────────────────────────────────────
 open class VCloud : ExtractorApi() {
     override val name: String = "V-Cloud"
     override val mainUrl: String = "https://vcloud.*"
@@ -113,19 +139,20 @@ open class VCloud : ExtractorApi() {
         }
 
         document.select("h2 a.btn").amap {
-            val link = it.attr("href")
+            val href = it.attr("href")
             val text = it.text()
             when {
-                text.contains("FSL Server") -> myCallback(link, "[FSL Server]")
-                text.contains("FSLv2") -> myCallback(link, "[FSLv2 Server]")
-                text.contains("Mega Server") -> myCallback(link, "[Mega Server]")
-                text.contains("Download File") -> myCallback(link)
+                text.contains("FSL Server") -> myCallback(href, "[FSL Server]")
+                text.contains("FSLv2") -> myCallback(href, "[FSLv2 Server]")
+                text.contains("Mega Server") -> myCallback(href, "[Mega Server]")
+                text.contains("Download File") -> myCallback(href)
                 text.contains("BuzzServer") -> {
-                    val dlink = app.get("$link/download", referer = link, allowRedirects = false).headers["hx-redirect"] ?: ""
-                    val bUrl = getBaseUrl(link)
+                    val dlink = app.get("$href/download", referer = href, allowRedirects = false)
+                        .headers["hx-redirect"] ?: ""
+                    val bUrl = getBaseUrl(href)
                     if (dlink != "") myCallback(bUrl + dlink, "[BuzzServer]")
                 }
-                link.contains("pixeldra") -> {
+                href.contains("pixeldra") -> {
                     val pixelLink = extractPxlUrl(document.toString()) ?: return@amap
                     val baseUrlLink = getBaseUrl(pixelLink)
                     val finalURL = if (pixelLink.contains("download", true)) {
@@ -136,35 +163,205 @@ open class VCloud : ExtractorApi() {
                     myCallback(finalURL, "[Pixeldrain]")
                 }
                 text.contains("Server : 10Gbps") -> {
-                    var redirectUrl = resolveFinalUrl(link) ?: return@amap
+                    var redirectUrl = resolveFinalUrl(href) ?: return@amap
                     if (redirectUrl.contains("link=")) redirectUrl = redirectUrl.substringAfter("link=")
                     myCallback(redirectUrl, "[Download]")
                 }
-                text.contains("Gofile") -> loadExtractor(link, "", subtitleCallback, callback)
-                else -> Log.d("BingeCloud", "No server matched")
+                text.contains("Gofile") -> loadExtractor(href, "", subtitleCallback, callback)
+                else -> Log.d("BingeCloud", "V-Cloud: no server matched for: $text")
             }
         }
     }
 }
 
-suspend fun resolveFinalUrl(startUrl: String): String? {
-    var currentUrl = startUrl
-    var loopCount = 0
-    val maxRedirects = 7
-    while (loopCount < maxRedirects) {
+// ─────────────────────────────────────────────────────────
+// V-DRIVE EXTRACTOR (new)
+// ─────────────────────────────────────────────────────────
+open class VDrive : ExtractorApi() {
+    override val name: String = "V-Drive"
+    override val mainUrl: String = "https://vdrive.*"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        Log.d("BingeCloud", "V-Drive: starting with $url")
         try {
-            val res = app.head(currentUrl, allowRedirects = false, timeout = 2500L)
-            if (res.code == 200 || res.code in 300..399) {
-                val location = res.headers["Location"]
-                if (location.isNullOrEmpty()) break
-                currentUrl = location
-            } else {
-                return null
+            val doc = app.get(url).document
+
+            // V-Drive typically shows a list of files. Look for download links.
+            val links = doc.select("a[href]").mapNotNull { a ->
+                val href = a.attr("href")
+                val text = a.text().lowercase()
+                if (href.startsWith("http") &&
+                    (text.contains("download") || text.contains("file") || text.contains("cloud"))) {
+                    href
+                } else null
             }
-            loopCount++
+
+            if (links.isNotEmpty()) {
+                for (link in links) {
+                    callback.invoke(
+                        newExtractorLink(
+                            source = name,
+                            name = "$name ${doc.title().take(40)}",
+                            url = link,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = url
+                            this.quality = Qualities.Unknown.value
+                        }
+                    )
+                }
+                return
+            }
+
+            // Fallback: look for a meta refresh or JS redirect
+            val refresh = doc.selectFirst("meta[http-equiv=refresh]")?.attr("content") ?: ""
+            val redirectUrl = Regex("""url=(https?://\S+)""").find(refresh)?.groupValues?.get(1)
+            if (!redirectUrl.isNullOrEmpty()) {
+                getUrl(redirectUrl, url, subtitleCallback, callback)
+                return
+            }
+
+            // Fallback: look for a JS var with a URL
+            val scriptText = doc.select("script").toString()
+            val jsUrl = Regex("""(?:url|link|file)\s*[:=]\s*['"](https?://[^'"]+)['"]""")
+                .find(scriptText)?.groupValues?.get(1)
+            if (!jsUrl.isNullOrEmpty()) {
+                callback.invoke(
+                    newExtractorLink(name, name, jsUrl, ExtractorLinkType.VIDEO) {
+                        this.referer = url
+                        this.quality = Qualities.Unknown.value
+                    }
+                )
+            }
         } catch (e: Exception) {
-            return null
+            Log.e("BingeCloud", "V-Drive failed: ${e.message}")
         }
     }
-    return currentUrl
+}
+
+// ─────────────────────────────────────────────────────────
+// G-DIRECT EXTRACTOR (new)
+// Google Drive direct link resolver
+// ─────────────────────────────────────────────────────────
+open class GDirect : ExtractorApi() {
+    override val name: String = "G-Direct"
+    override val mainUrl: String = "https://gdirect.*"
+    override val requiresReferer = false
+
+    private fun extractDriveId(url: String): String? {
+        val patterns = listOf(
+            Regex("""/file/d/([a-zA-Z0-9_-]+)"""),
+            Regex("""[?&]id=([a-zA-Z0-9_-]+)"""),
+            Regex("""/d/([a-zA-Z0-9_-]+)"""),
+            Regex("""^([a-zA-Z0-9_-]{25,})$""")
+        )
+        for (p in patterns) {
+            p.find(url)?.groupValues?.getOrNull(1)?.let { return it }
+        }
+        return null
+    }
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        Log.d("BingeCloud", "G-Direct: starting with $url")
+
+        // Follow redirects first to find the real Google Drive link
+        val finalUrl = resolveFinalUrl(url) ?: url
+        Log.d("BingeCloud", "G-Direct: resolved to $finalUrl")
+
+        val driveId = extractDriveId(finalUrl) ?: extractDriveId(url)
+        if (driveId == null) {
+            Log.e("BingeCloud", "G-Direct: no Drive ID found")
+            return
+        }
+
+        // Google Drive direct download URL
+        val directUrl = "https://drive.google.com/uc?export=download&id=$driveId&confirm=t"
+
+        callback.invoke(
+            newExtractorLink(
+                source = name,
+                name = "$name (Drive)",
+                url = directUrl,
+                type = ExtractorLinkType.VIDEO
+            ) {
+                this.referer = "https://drive.google.com/"
+                this.quality = Qualities.Unknown.value
+            }
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// FILEPRESS / GDFLIX EXTRACTOR (new)
+// ─────────────────────────────────────────────────────────
+open class Filepress : ExtractorApi() {
+    override val name: String = "Filepress"
+    override val mainUrl: String = "https://filepress.*"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        Log.d("BingeCloud", "Filepress: starting with $url")
+        try {
+            val doc = app.get(url).document
+
+            // Filepress pages usually have a table of files with download buttons
+            val rows = doc.select("tr, .file-row, .list-group-item")
+            for (row in rows) {
+                val anchor = row.selectFirst("a[href]") ?: continue
+                val href = anchor.attr("href")
+                val text = anchor.text().lowercase()
+
+                if (href.startsWith("http") && (text.contains("download") || text.contains("gdflix"))) {
+                    // If it's another GDFlix link, recurse
+                    if (href.contains("gdflix", true) && href != url) {
+                        getUrl(href, url, subtitleCallback, callback)
+                    } else {
+                        callback.invoke(
+                            newExtractorLink(
+                                source = name,
+                                name = "$name ${row.text().take(40)}",
+                                url = href,
+                                type = ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = url
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Fallback: look for direct links in the page
+            val directLinks = doc.select("a[href*='drive.google.com'], a[href*='.mkv'], a[href*='.mp4']")
+            for (a in directLinks) {
+                val href = a.attr("href")
+                if (href.startsWith("http")) {
+                    callback.invoke(
+                        newExtractorLink(name, name, href, ExtractorLinkType.VIDEO) {
+                            this.referer = url
+                            this.quality = Qualities.Unknown.value
+                        }
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("BingeCloud", "Filepress failed: ${e.message}")
+        }
+    }
 }
