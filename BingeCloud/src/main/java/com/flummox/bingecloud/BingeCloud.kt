@@ -108,4 +108,71 @@ class BingeCloud : MainAPI() {
             }
         }
     }
+
+    // ─────────────────────────────────────────────────────────
+    // NEW: loadLinks
+    // ─────────────────────────────────────────────────────────
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val parts = data.split("/")
+        if (parts.size < 2) return false
+
+        // Build the vidsrc.to embed URL based on media type
+        val embedUrl = if (parts[0] == "movie") {
+            "$mainUrl/embed/movie/${parts[1]}"
+        } else {
+            // TV: parts = [tv, tmdbId, season, episode]
+            if (parts.size < 4) return false
+            "$mainUrl/embed/tv/${parts[1]}/${parts[2]}/${parts[3]}"
+        }
+
+        // Fetch the embed page
+        val doc = app.get(embedUrl).document
+
+        // vidsrc.to hides the .m3u8 inside a script or iframe. Try both.
+        // 1. Look for a direct .m3u8 in the HTML
+        val m3u8Regex = Regex("""https?://[^\s"'\\]+\.m3u8[^\s"'\\]*""")
+        val directMatch = m3u8Regex.find(doc.html())?.value
+
+        // 2. If not found, look for an iframe that might contain it
+        val iframeSrc = doc.selectFirst("iframe")?.attr("src")
+        var m3u8Url = directMatch
+
+        if (m3u8Url == null && !iframeSrc.isNullOrEmpty()) {
+            val iframeDoc = app.get(iframeSrc).document
+            m3u8Url = m3u8Regex.find(iframeDoc.html())?.value
+        }
+
+        // 3. If still not found, try a common vidsrc JSON endpoint
+        if (m3u8Url == null) {
+            val sourceId = doc.selectFirst("a[data-id]")?.attr("data-id")
+            if (!sourceId.isNullOrEmpty()) {
+                val apiUrl = "$mainUrl/ajax/embed/source/$sourceId"
+                val jsonRes = app.get(apiUrl).text
+                val jsonUrl = JSONObject(jsonRes).optString("result", "")
+                if (jsonUrl.contains(".m3u8")) {
+                    m3u8Url = Regex("""https?://[^\s"'\\]+""").find(jsonUrl)?.value
+                }
+            }
+        }
+
+        if (m3u8Url == null) return false
+
+        callback.invoke(
+            newExtractorLink(
+                source = this.name,
+                name = this.name,
+                url = m3u8Url,
+                type = ExtractorLinkType.M3U8
+            ) {
+                this.referer = embedUrl
+                this.quality = ExtractorLinkQuality.UNKNOWN
+            }
+        )
+        return true
+    }
 }
