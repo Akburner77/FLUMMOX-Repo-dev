@@ -169,8 +169,8 @@ class BingeCloud : MainAPI() {
                 url = m3u8Url,
                 type = ExtractorLinkType.M3U8
             ) {
-                this.referer = embedUrl
-                this.quality = ExtractorLinkQuality.UNKNOWN
+    this.referer = embedUrl
+    this.quality = Qualities.Unknown.value
             }
         )
         return true
