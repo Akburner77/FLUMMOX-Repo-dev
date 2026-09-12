@@ -1,6 +1,8 @@
-apply(plugin = "com.android.library")
-apply(plugin = "org.jetbrains.kotlin.android")
-apply(plugin = "com.lagradost.cloudstream3.gradle")
+plugins {
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
+    id("com.lagradost.cloudstream3.gradle")
+}
 
 android {
     namespace = "com.flummox.bingecloud"
@@ -18,7 +20,7 @@ android {
 }
 
 cloudstream {
-    description = "BingeCloud — Movies & TV Series"
+    description = "BingeCloud - Movies & TV Series"
     authors = listOf("FlummoxGamer")
     status = 1
     tvTypes = listOf("Movie", "TvSeries")
