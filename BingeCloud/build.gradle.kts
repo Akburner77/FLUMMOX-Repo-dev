@@ -9,6 +9,10 @@ android {
     compileSdk = 35
     defaultConfig {
         minSdk = 21
+        buildConfigField("String", "TMDB_API_KEY", "\"${System.getenv("TMDB_API_KEY") ?: ""}\"")
+    }
+    buildFeatures {
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
