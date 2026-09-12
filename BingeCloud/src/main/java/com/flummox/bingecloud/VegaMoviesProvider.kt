@@ -133,20 +133,21 @@ open class VegaMoviesProvider : MainAPI() {
         var year = ""
         var background = posterUrl
 
-        if (imdbId.isNotEmpty()) {
-            val jsonResponse = app.get("$cinemetaUrl/${if (isSeries) "series" else "movie"}/$imdbId.json").text
-            val responseData = tryParseJson<ResponseData>(jsonResponse)
-            if (responseData != null) {
-                description = responseData.meta.description ?: description
-                cast = responseData.meta.cast ?: emptyList()
-                title = responseData.meta.name ?: title
-                genre = responseData.meta.genre ?: emptyList()
-                imdbRating = responseData.meta.imdbRating ?: ""
-                year = responseData.meta.year ?: ""
-                posterUrl = responseData.meta.poster ?: posterUrl
-                background = responseData.meta.background ?: background
-            }
-        }
+        var responseData: ResponseData? = null
+if (imdbId.isNotEmpty()) {
+    val jsonResponse = app.get("$cinemetaUrl/${if (isSeries) "series" else "movie"}/$imdbId.json").text
+    responseData = tryParseJson<ResponseData>(jsonResponse)
+    if (responseData != null) {
+        description = responseData.meta.description ?: description
+        cast = responseData.meta.cast ?: emptyList()
+        title = responseData.meta.name ?: title
+        genre = responseData.meta.genre ?: emptyList()
+        imdbRating = responseData.meta.imdbRating ?: ""
+        year = responseData.meta.year ?: ""
+        posterUrl = responseData.meta.poster ?: posterUrl
+        background = responseData.meta.background ?: background
+    }
+}
 
         return if (isSeries) {
     // Build season → mirrors map from VegaMovies page
