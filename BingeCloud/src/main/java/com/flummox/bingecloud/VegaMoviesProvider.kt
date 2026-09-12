@@ -149,7 +149,6 @@ open class VegaMoviesProvider : MainAPI() {
         }
 
         return if (isSeries) {
-            // ... TV series logic (same as before, keep your existing episode parsing) ...
             val episodes = mutableListOf<Episode>()
             val seasonHeaders = document.select(
                 "main > h3:matches((?i)(4K|[0-9]*0p)),main > h5:matches((?i)(4K|[0-9]*0p))"
@@ -189,19 +188,22 @@ open class VegaMoviesProvider : MainAPI() {
             }
 
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = posterUrl; this.plot = description; this.tags = genre
-                this.score = Score.from10(imdbRating); this.year = year.toIntOrNull()
-                this.backgroundPosterUrl = background; addActors(cast)
+                this.posterUrl = posterUrl
+                this.plot = description
+                this.tags = genre
+                this.score = Score.from10(imdbRating)
+                this.year = year.toIntOrNull()
+                this.backgroundPosterUrl = background
+                addActors(cast)
             }
         } else {
-            // ─────────── MOVIES: PARALLEL mirror fetching ───────────
             val allMirrors = mutableListOf<MirrorLink>()
-            val qualityHeaders = document.select("main > h3, main > h5, main > h4").filter {
+
+            val qualityHeaders = document.select("h3, h4, h5, .entry-title, .quality-title").filter {
                 val txt = it.text()
                 txt.contains(Regex("""\d{3,4}[pP]""")) && !txt.contains("Zip", true)
             }
 
-            // PARALLEL: fetch all quality download pages simultaneously
             val results = qualityHeaders.amap { header ->
                 val headerText = header.text()
                 val quality = extractQualityFromHeader(headerText)
@@ -228,15 +230,20 @@ open class VegaMoviesProvider : MainAPI() {
             allMirrors.forEach { Log.d("BingeCloud", "${it.mirror} | ${it.quality} | ${it.size}") }
 
             newMovieLoadResponse(title, url, TvType.Movie, allMirrors) {
-                this.posterUrl = posterUrl; this.plot = description; this.tags = genre
-                this.score = Score.from10(imdbRating); this.year = year.toIntOrNull()
-                this.backgroundPosterUrl = background; addActors(cast)
+                this.posterUrl = posterUrl
+                this.plot = description
+                this.tags = genre
+                this.score = Score.from10(imdbRating)
+                this.year = year.toIntOrNull()
+                this.backgroundPosterUrl = background
+                addActors(cast)
             }
         }
     }
 
-    // ─────────── IMPROVED MIRROR DETECTION ───────────
-    // Matches by button TEXT (more reliable than URL keywords)
+    // ─────────────────────────────────────────────────────────
+    // MIRROR DETECTION — scans <a>, <button>, [onclick], [data-href]
+    // ─────────────────────────────────────────────────────────
     private suspend fun fetchMirrorsFromDownloadPage(
         downloadUrl: String,
         quality: String,
@@ -246,59 +253,54 @@ open class VegaMoviesProvider : MainAPI() {
         try {
             val doc = app.get(fixUrl(downloadUrl)).document
 
-            // Collect all anchors — the nexdrive.fit page has buttons as <a> tags
-            val anchors = doc.select("a")
+            val candidates = doc.select("a, button, [onclick], [data-href]")
 
-            for (a in anchors) {
-                val href = a.attr("href").trim()
-                val text = a.text().trim().lowercase()
+            for (elem in candidates) {
+                var href = elem.attr("href").trim()
+                if (href.isEmpty() || href == "#") {
+                    href = elem.attr("data-href").trim()
+                }
+                if (href.isEmpty() || href == "#") {
+                    val onclick = elem.attr("onclick")
+                    if (onclick.isNotEmpty()) {
+                        href = Regex("""['"](https?://[^'"]+)['"]""").find(onclick)
+                            ?.groupValues?.get(1) ?: ""
+                    }
+                }
                 if (href.isEmpty() || href.startsWith("#")) continue
 
-                // Match by TEXT — most reliable
+                val text = elem.text().trim().lowercase()
+
                 when {
-                    text.contains("v-cloud") || text.contains("vcloud") ||
-                    href.contains("vcloud", true) -> {
-                        mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
+                    text.contains("v-cloud") || text.contains("vcloud") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
                     }
-                    text.contains("v-drive") || text.contains("vdrive") ||
-                    href.contains("vdrive", true) -> {
-                        mirrors.add(MirrorLink(quality, size, "V-Drive", href))
+                    text.contains("v-drive") || text.contains("vdrive") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "V-Drive", href))
                     }
-                    text.contains("g-direct") || text.contains("gdirect") ||
-                    href.contains("gdirect", true) ||
-                    href.contains("drive.google.com", true) -> {
-                        mirrors.add(MirrorLink(quality, size, "G-Direct", href))
+                    text.contains("g-direct") || text.contains("gdirect") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "G-Direct", href))
                     }
-                    text.contains("filepress") || text.contains("gdflix") ||
-                    href.contains("filepress", true) || href.contains("gdflix", true) -> {
-                        mirrors.add(MirrorLink(quality, size, "Filepress", href))
+                    text.contains("filepress") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "Filepress", href))
                     }
-                    // Fallback: any button that mentions "download" and is a real URL
-                    text.contains("download") && href.startsWith("http") -> {
-                        // Only add if not already captured
-                        if (mirrors.none { it.url == href }) {
+                    text.contains("gdflix") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "GDFlix", href))
+                    }
+                    text.contains("download now") && href.startsWith("http") -> {
+                        if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "Direct", href))
-                        }
                     }
                 }
             }
 
-            // Also check <p> tags (some pages nest anchors inside <p>)
-            doc.select("p a").forEach { a ->
-                val href = a.attr("href").trim()
-                if (href.isEmpty() || mirrors.any { it.url == href }) return@forEach
-                val text = a.text().trim().lowercase()
-                when {
-                    text.contains("v-cloud") || href.contains("vcloud", true) ->
-                        mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
-                    text.contains("v-drive") || href.contains("vdrive", true) ->
-                        mirrors.add(MirrorLink(quality, size, "V-Drive", href))
-                    text.contains("g-direct") || href.contains("gdirect", true) ->
-                        mirrors.add(MirrorLink(quality, size, "G-Direct", href))
-                    text.contains("filepress") || href.contains("filepress", true) ->
-                        mirrors.add(MirrorLink(quality, size, "Filepress", href))
-                }
-            }
+            Log.d("BingeCloud", "Mirrors found on $downloadUrl: ${mirrors.size}")
+            mirrors.forEach { Log.d("BingeCloud", "  ${it.mirror} | ${it.quality} | ${it.size} | ${it.url}") }
         } catch (e: Exception) {
             Log.e("BingeCloud", "fetchMirrors error: ${e.message}")
         }
@@ -311,7 +313,6 @@ open class VegaMoviesProvider : MainAPI() {
     private fun extractSizeFromHeader(header: String): String =
         Regex("""\[([^\]]*(?:MB|GB)[^\]]*)\]""").find(header)?.groupValues?.getOrNull(1) ?: ""
 
-    // ─────────── PARALLEL LINK LOADING ───────────
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -325,9 +326,8 @@ open class VegaMoviesProvider : MainAPI() {
             return false
         }
 
-        Log.d("BingeCloud", "loadLinks: ${mirrors.size} mirrors, loading in parallel")
+        Log.d("BingeCloud", "loadLinks: ${mirrors.size} mirrors")
 
-        // PARALLEL: all mirrors at once, not one-by-one
         mirrors.amap { mirror ->
             try {
                 when {
