@@ -5,7 +5,6 @@ import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import java.net.URI
-import java.net.URLDecoder
 
 fun base64Decode(str: String): String {
     return try {
@@ -68,7 +67,7 @@ suspend fun resolveFinalUrl(startUrl: String): String? {
 }
 
 // ─────────────────────────────────────────────────────────
-// V-CLOUD EXTRACTOR (existing, works)
+// V-CLOUD EXTRACTOR
 // ─────────────────────────────────────────────────────────
 open class VCloud : ExtractorApi() {
     override val name: String = "V-Cloud"
@@ -175,7 +174,7 @@ open class VCloud : ExtractorApi() {
 }
 
 // ─────────────────────────────────────────────────────────
-// V-DRIVE EXTRACTOR (new)
+// V-DRIVE EXTRACTOR (improved multi-step)
 // ─────────────────────────────────────────────────────────
 open class VDrive : ExtractorApi() {
     override val name: String = "V-Drive"
@@ -188,26 +187,26 @@ open class VDrive : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("BingeCloud", "V-Drive: starting with $url")
+        Log.d("BingeCloud", "V-Drive: $url")
         try {
             val doc = app.get(url).document
 
-            // V-Drive typically shows a list of files. Look for download links.
-            val links = doc.select("a[href]").mapNotNull { a ->
+            val fileLinks = doc.select("a[href]").mapNotNull { a ->
                 val href = a.attr("href")
                 val text = a.text().lowercase()
                 if (href.startsWith("http") &&
-                    (text.contains("download") || text.contains("file") || text.contains("cloud"))) {
+                    (text.contains("download") || text.contains("file") ||
+                     text.contains("cloud") || text.contains("get link"))) {
                     href
                 } else null
             }
 
-            if (links.isNotEmpty()) {
-                for (link in links) {
+            if (fileLinks.isNotEmpty()) {
+                fileLinks.forEach { link ->
                     callback.invoke(
                         newExtractorLink(
                             source = name,
-                            name = "$name ${doc.title().take(40)}",
+                            name = "$name [${doc.title().take(30)}]",
                             url = link,
                             type = ExtractorLinkType.VIDEO
                         ) {
@@ -219,7 +218,6 @@ open class VDrive : ExtractorApi() {
                 return
             }
 
-            // Fallback: look for a meta refresh or JS redirect
             val refresh = doc.selectFirst("meta[http-equiv=refresh]")?.attr("content") ?: ""
             val redirectUrl = Regex("""url=(https?://\S+)""").find(refresh)?.groupValues?.get(1)
             if (!redirectUrl.isNullOrEmpty()) {
@@ -227,7 +225,6 @@ open class VDrive : ExtractorApi() {
                 return
             }
 
-            // Fallback: look for a JS var with a URL
             val scriptText = doc.select("script").toString()
             val jsUrl = Regex("""(?:url|link|file)\s*[:=]\s*['"](https?://[^'"]+)['"]""")
                 .find(scriptText)?.groupValues?.get(1)
@@ -246,8 +243,7 @@ open class VDrive : ExtractorApi() {
 }
 
 // ─────────────────────────────────────────────────────────
-// G-DIRECT EXTRACTOR (new)
-// Google Drive direct link resolver
+// G-DIRECT EXTRACTOR (Google Drive)
 // ─────────────────────────────────────────────────────────
 open class GDirect : ExtractorApi() {
     override val name: String = "G-Direct"
@@ -273,21 +269,14 @@ open class GDirect : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("BingeCloud", "G-Direct: starting with $url")
-
-        // Follow redirects first to find the real Google Drive link
+        Log.d("BingeCloud", "G-Direct: $url")
         val finalUrl = resolveFinalUrl(url) ?: url
-        Log.d("BingeCloud", "G-Direct: resolved to $finalUrl")
-
         val driveId = extractDriveId(finalUrl) ?: extractDriveId(url)
         if (driveId == null) {
-            Log.e("BingeCloud", "G-Direct: no Drive ID found")
+            Log.e("BingeCloud", "G-Direct: no Drive ID")
             return
         }
-
-        // Google Drive direct download URL
         val directUrl = "https://drive.google.com/uc?export=download&id=$driveId&confirm=t"
-
         callback.invoke(
             newExtractorLink(
                 source = name,
@@ -303,7 +292,7 @@ open class GDirect : ExtractorApi() {
 }
 
 // ─────────────────────────────────────────────────────────
-// FILEPRESS / GDFLIX EXTRACTOR (new)
+// FILEPRESS / GDFLIX EXTRACTOR
 // ─────────────────────────────────────────────────────────
 open class Filepress : ExtractorApi() {
     override val name: String = "Filepress"
@@ -316,11 +305,10 @@ open class Filepress : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("BingeCloud", "Filepress: starting with $url")
+        Log.d("BingeCloud", "Filepress: $url")
         try {
             val doc = app.get(url).document
 
-            // Filepress pages usually have a table of files with download buttons
             val rows = doc.select("tr, .file-row, .list-group-item")
             for (row in rows) {
                 val anchor = row.selectFirst("a[href]") ?: continue
@@ -328,7 +316,6 @@ open class Filepress : ExtractorApi() {
                 val text = anchor.text().lowercase()
 
                 if (href.startsWith("http") && (text.contains("download") || text.contains("gdflix"))) {
-                    // If it's another GDFlix link, recurse
                     if (href.contains("gdflix", true) && href != url) {
                         getUrl(href, url, subtitleCallback, callback)
                     } else {
@@ -347,7 +334,6 @@ open class Filepress : ExtractorApi() {
                 }
             }
 
-            // Fallback: look for direct links in the page
             val directLinks = doc.select("a[href*='drive.google.com'], a[href*='.mkv'], a[href*='.mp4']")
             for (a in directLinks) {
                 val href = a.attr("href")
