@@ -29,6 +29,8 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5'
 
       - name: Clean old .cs3
         run: rm -f builds/*.cs3
