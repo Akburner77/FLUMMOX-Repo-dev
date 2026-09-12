@@ -1,14 +1,28 @@
+apply(plugin = "com.android.library")
+apply(plugin = "org.jetbrains.kotlin.android")
+apply(plugin = "com.lagradost.cloudstream3.gradle")
+
+android {
+    namespace = "com.flummox.bingecloud"
+    compileSdk = 34
+    defaultConfig {
+        minSdk = 21
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
 cloudstream {
     description = "BingeCloud — Movies & TV Series"
     authors = listOf("FlummoxGamer")
     status = 1
     tvTypes = listOf("Movie", "TvSeries")
     language = "en"
-}
-
-android {
-    namespace = "com.flummox.bingecloud"
-    sourceSets["main"].java.srcDirs("src/main/kotlin")
 }
 
 dependencies {
