@@ -27,6 +27,7 @@ kotlin {
 }
 
 cloudstream {
+    repositoryUrl = "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds"
     description = "BingeCloud - Movies & TV Series"
     authors = listOf("FlummoxGamer")
     status = 1
