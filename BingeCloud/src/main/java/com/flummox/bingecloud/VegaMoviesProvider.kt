@@ -331,23 +331,17 @@ open class VegaMoviesProvider : MainAPI() {
         Log.d("BingeCloud", "loadLinks: ${mirrors.size} mirrors")
 
         mirrors.amap { mirror ->
-            try {
-                when {
-                    mirror.url.contains("vcloud", true) ->
-                        VCloud().getUrl(mirror.url, "", subtitleCallback, callback)
-                    mirror.url.contains("vdrive", true) ->
-                        VDrive().getUrl(mirror.url, "", subtitleCallback, callback)
-                    mirror.url.contains("gdirect", true) ||
-                    mirror.url.contains("drive.google.com", true) ->
-                        GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
-                    mirror.url.contains("filepress", true) ||
-                    mirror.url.contains("gdflix", true) ->
-                        Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
-                    else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
-                }
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
-            }
+    try {
+        when (mirror.mirror) {
+            "V-Cloud" -> VCloud().getUrl(mirror.url, "", subtitleCallback, callback)
+            "V-Drive" -> VDrive().getUrl(mirror.url, "", subtitleCallback, callback)
+            "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
+            "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
+            else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
+        }
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
+    }
         }
         return true
     }
