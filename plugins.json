@@ -1,0 +1,21 @@
+[
+    {
+        "fileHash": "sha256-13673470211e2142a1edcfc45219c9177588f951ee6b23fa4d5bb6df591471b8",
+        "apiVersion": 1,
+        "fileSize": 2671,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "FlummoxGamer"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": -1,
+        "internalName": "BingeCloud",
+        "description": "BingeCloud - Movies & TV Series",
+        "url": "",
+        "name": "BingeCloud"
+    }
+]
