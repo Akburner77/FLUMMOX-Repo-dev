@@ -176,9 +176,9 @@ open class VCloud : ExtractorApi() {
 // ─────────────────────────────────────────────────────────
 // V-DRIVE EXTRACTOR (improved multi-step)
 // ─────────────────────────────────────────────────────────
-open class VDrive : ExtractorApi() {
-    override val name: String = "V-Drive"
-    override val mainUrl: String = "https://vdrive.*"
+ open class VDrive : ExtractorApi() {
+    override val name = "V-Drive"
+    override val mainUrl = "https://vegadrive.app"
     override val requiresReferer = false
 
     override suspend fun getUrl(
@@ -187,60 +187,95 @@ open class VDrive : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("BingeCloud", "V-Drive: $url")
         try {
             val doc = app.get(url).document
+            val mirrorAnchors = doc.select("a[href*='/d/']")
 
-            val fileLinks = doc.select("a[href]").mapNotNull { a ->
+            mirrorAnchors.amap { a ->
                 val href = a.attr("href")
-                val text = a.text().lowercase()
-                if (href.startsWith("http") &&
-                    (text.contains("download") || text.contains("file") ||
-                     text.contains("cloud") || text.contains("get link"))) {
-                    href
-                } else null
-            }
+                val text = a.text().trim().lowercase()
 
-            if (fileLinks.isNotEmpty()) {
-                fileLinks.forEach { link ->
+                if (text.contains("vegadrop") || href.endsWith("/skydrop")) return@amap
+
+                val finalUrl = try {
+                    val res = app.get(href, allowRedirects = false)
+                    res.headers["Location"] ?: href
+                } catch (e: Exception) { href }
+
+                when {
+                    text.contains("pixeldrain") || finalUrl.contains("pixeldrain") -> {
+                        val id = finalUrl.substringAfterLast("/")
+                        callback.invoke(
+                            newExtractorLink(name, "V-Drive · Pixeldrain",
+                                "https://pixeldrain.com/api/file/$id?download",
+                                ExtractorLinkType.VIDEO) {
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                    }
+                    text.contains("gofile") || finalUrl.contains("gofile") -> {
+                        emitGofile(finalUrl, callback)
+                    }
+                    text.contains("transferit") || finalUrl.contains("transfer.it") -> {
+                        callback.invoke(
+                            newExtractorLink(name, "V-Drive · Transfer.it",
+                                finalUrl, ExtractorLinkType.VIDEO) {
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                    }
+                    text.contains("buzzheavier") || finalUrl.contains("buzzheavier") -> {
+                        callback.invoke(
+                            newExtractorLink(name, "V-Drive · Buzzheavier",
+                                finalUrl, ExtractorLinkType.VIDEO) {
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                    }
+                    text.contains("vikingfile") || finalUrl.contains("vikingfile") -> {
+                        callback.invoke(
+                            newExtractorLink(name, "V-Drive · VikingFile",
+                                finalUrl, ExtractorLinkType.VIDEO) {
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("BingeCloud", "VDrive failed: ${e.message}")
+        }
+    }
+
+    private suspend fun emitGofile(redirectUrl: String, callback: (ExtractorLink) -> Unit) {
+        try {
+            val gofileUrl = app.get(redirectUrl, allowRedirects = true).url
+            val contentId = gofileUrl.substringAfterLast("/").substringBefore("?")
+            if (contentId.isEmpty()) return
+
+            val apiUrl = "https://api.gofile.io/contents/$contentId?wt=4fd6sg89d7s6"
+            val json = app.get(apiUrl).text
+            val obj = org.json.JSONObject(json)
+            val data = obj.optJSONObject("data") ?: return
+            val children = data.optJSONObject("children") ?: return
+
+            children.keys().forEach { key ->
+                val file = children.getJSONObject(key)
+                val link = file.optString("link")
+                if (link.startsWith("http")) {
                     callback.invoke(
-                        newExtractorLink(
-                            source = name,
-                            name = "$name [${doc.title().take(30)}]",
-                            url = link,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = url
+                        newExtractorLink(name, "V-Drive · Gofile",
+                            link, ExtractorLinkType.VIDEO) {
                             this.quality = Qualities.Unknown.value
                         }
                     )
                 }
-                return
-            }
-
-            val refresh = doc.selectFirst("meta[http-equiv=refresh]")?.attr("content") ?: ""
-            val redirectUrl = Regex("""url=(https?://\S+)""").find(refresh)?.groupValues?.get(1)
-            if (!redirectUrl.isNullOrEmpty()) {
-                getUrl(redirectUrl, url, subtitleCallback, callback)
-                return
-            }
-
-            val scriptText = doc.select("script").toString()
-            val jsUrl = Regex("""(?:url|link|file)\s*[:=]\s*['"](https?://[^'"]+)['"]""")
-                .find(scriptText)?.groupValues?.get(1)
-            if (!jsUrl.isNullOrEmpty()) {
-                callback.invoke(
-                    newExtractorLink(name, name, jsUrl, ExtractorLinkType.VIDEO) {
-                        this.referer = url
-                        this.quality = Qualities.Unknown.value
-                    }
-                )
             }
         } catch (e: Exception) {
-            Log.e("BingeCloud", "V-Drive failed: ${e.message}")
+            Log.e("BingeCloud", "Gofile failed: ${e.message}")
         }
     }
-}
+ }
 
 // ─────────────────────────────────────────────────────────
 // G-DIRECT EXTRACTOR (Google Drive)
