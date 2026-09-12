@@ -1,0 +1,8 @@
+{
+  "name": "BingeCloud Repository",
+  "description": "BingeCloud - Movies & TV Series",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds/plugins.json"
+  ]
+}
