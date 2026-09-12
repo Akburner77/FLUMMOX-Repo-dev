@@ -1,10 +1,10 @@
 [
   {
-    "fileHash": "sha256-51c885cf9abb466950d3323c3955ad12359e3ddd2e2167fa05119cc23446e1dc",
+    "fileHash": "sha256-81ee3b74579d1c50afb68611a17bd11762e8a57f8ff2b98e81e625c37f61d5f3",
     "apiVersion": 1,
-    "fileSize": 26552,
+    "fileSize": 52179,
     "status": 1,
-    "language": "hi",
+    "language": "en",
     "authors": [
       "FlummoxGamer"
     ],
@@ -14,7 +14,7 @@
     ],
     "version": 1,
     "internalName": "BingeCloud",
-    "description": "BingeCloud - VegaMovies provider",
+    "description": "BingeCloud - Movies & TV Series",
     "url": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds/BingeCloud.cs3",
     "name": "BingeCloud"
   }
