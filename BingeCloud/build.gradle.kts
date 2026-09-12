@@ -8,6 +8,7 @@ cloudstream {
 
 android {
     namespace = "com.flummox.bingecloud"
+    sourceSets["main"].java.srcDirs("src/main/kotlin")
 }
 
 dependencies {
