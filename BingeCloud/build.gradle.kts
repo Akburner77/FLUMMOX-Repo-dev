@@ -9,7 +9,6 @@ android {
     compileSdk = 35
     defaultConfig {
         minSdk = 21
-        buildConfigField("String", "TMDB_API_KEY", "\"${System.getenv("TMDB_API_KEY") ?: ""}\"")
     }
     buildFeatures {
         buildConfig = true
@@ -27,10 +26,10 @@ kotlin {
 }
 
 cloudstream {
-    description = "BingeCloud - VegaMovies & TV Series"
+    description = "BingeCloud - VegaMovies provider"
     authors = listOf("FlummoxGamer")
     status = 1
-    tvTypes = listOf("Movie", "TvSeries", "AsianDrama", "Anime")
+    tvTypes = listOf("Movie", "TvSeries")
     language = "hi"
 }
 
@@ -40,5 +39,5 @@ dependencies {
     implementation("com.github.Blatzar:NiceHttp:0.4.11")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.13")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.21.2")
 }
