@@ -12,11 +12,12 @@ class BingeCloud : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val tmdbApi = "https://api.themoviedb.org/3"
-    private val tmdbKey get() = BuildConfig.TMDB_API_KEY
+    private val tmdbKey: String get() = BuildConfig.TMDB_API_KEY
     private val tmdbImg = "https://image.tmdb.org/t/p/w500"
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val res = app.get("$tmdbApi/trending/all/week?api_key=$tmdbKey&page=$page").text
+        val url = "$tmdbApi/trending/all/week?api_key=$tmdbKey&page=$page"
+        val res: String = app.get(url).text
         val results = JSONObject(res).getJSONArray("results")
         val items = (0 until results.length()).mapNotNull { i ->
             parseTmdbItem(results.getJSONObject(i))
@@ -25,7 +26,8 @@ class BingeCloud : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
-        val res = app.get("$tmdbApi/search/multi?api_key=$tmdbKey&query=$query").text
+        val url = "$tmdbApi/search/multi?api_key=$tmdbKey&query=$query"
+        val res: String = app.get(url).text
         val results = JSONObject(res).getJSONArray("results")
         return (0 until results.length()).mapNotNull { i ->
             parseTmdbItem(results.getJSONObject(i))
@@ -60,7 +62,7 @@ class BingeCloud : MainAPI() {
         val mediaType = parts[0]
         val id = parts[1]
 
-        val res = app.get("$tmdbApi/$mediaType/$id?api_key=$tmdbKey").text
+        val res: String = app.get("$tmdbApi/$mediaType/$id?api_key=$tmdbKey").text
         val o = JSONObject(res)
         val title = o.optString("title").ifEmpty { o.optString("name") }
         val posterPath = o.optString("poster_path")
@@ -82,7 +84,7 @@ class BingeCloud : MainAPI() {
                 val season = seasonsArray.getJSONObject(i)
                 val seasonNumber = season.optInt("season_number", -1)
                 if (seasonNumber < 0) continue
-                val seasonRes = app.get("$tmdbApi/tv/$id/season/$seasonNumber?api_key=$tmdbKey").text
+                val seasonRes: String = app.get("$tmdbApi/tv/$id/season/$seasonNumber?api_key=$tmdbKey").text
                 val seasonObj = JSONObject(seasonRes)
                 val epsArray = seasonObj.optJSONArray("episodes") ?: continue
                 for (j in 0 until epsArray.length()) {
