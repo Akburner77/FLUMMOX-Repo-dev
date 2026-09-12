@@ -290,10 +290,6 @@ if (imdbId.isNotEmpty()) {
                         if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
                     }
-                    text.contains("v-drive") || text.contains("vdrive") -> {
-                        if (mirrors.none { it.url == href })
-                            mirrors.add(MirrorLink(quality, size, "V-Drive", href))
-                    }
                     text.contains("g-direct") || text.contains("gdirect") -> {
                         if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "G-Direct", href))
@@ -346,7 +342,6 @@ if (imdbId.isNotEmpty()) {
     try {
         when (mirror.mirror) {
             "V-Cloud" -> VCloud().getUrl(mirror.url, "", subtitleCallback, callback)
-            "V-Drive" -> VDrive().getUrl(mirror.url, "", subtitleCallback, callback)
             "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
             "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
             else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
