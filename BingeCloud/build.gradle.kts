@@ -27,6 +27,7 @@ kotlin {
 }
 
 cloudstream {
+    setRepo("FlummoxGamer/FLUMMOX-Repo")
     description = "BingeCloud - Movies & TV Series"
     authors = listOf("FlummoxGamer")
     status = 1
