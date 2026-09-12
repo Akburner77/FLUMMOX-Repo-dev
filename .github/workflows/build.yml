@@ -52,6 +52,30 @@ jobs:
           find src -name "*.cs3" -exec cp {} builds/ \;
           find src -name "plugins.json" -exec cp {} builds/ \;
 
+      - name: Patch plugins.json URL
+        run: |
+          python3 - <<'EOF'
+          import json
+          import glob
+          import os
+          
+          repo = "FlummoxGamer/FLUMMOX-Repo"
+          base = f"https://raw.githubusercontent.com/{repo}/builds"
+          
+          with open("builds/plugins.json") as f:
+              data = json.load(f)
+          
+          for plugin in data:
+              name = plugin.get("internalName", "")
+              if not name:
+                  continue
+              plugin["url"] = f"{base}/{name}.cs3"
+              plugin["version"] = 1
+          
+          with open("builds/plugins.json", "w") as f:
+              json.dump(data, f, indent=2)
+          EOF
+
       - name: Push to builds branch
         working-directory: builds
         run: |
