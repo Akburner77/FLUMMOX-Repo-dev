@@ -1,4 +1,4 @@
-herebuildscript {
+buildscript {
     repositories {
         google()
         mavenCentral()
