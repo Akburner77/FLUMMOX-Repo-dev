@@ -149,56 +149,67 @@ open class VegaMoviesProvider : MainAPI() {
         }
 
         return if (isSeries) {
-    val episodes = mutableListOf<Episode>()
-    val seasonHeaders = document.select(
-        "h3, h4, h5"
-    ).filter {
+    // Build season → mirrors map from VegaMovies page
+    val seasonMirrorsMap: MutableMap<Int, MutableList<MirrorLink>> = mutableMapOf()
+    val seasonHeaders = document.select("h3, h4, h5").filter {
         val t = it.text()
         (t.contains(Regex("""(?:Season|S)\s*\d+""", RegexOption.IGNORE_CASE)) ||
-         t.contains("Complete", true)) &&
-        !t.contains("Zip", true)
+         t.contains("Complete", true)) && !t.contains("Zip", true)
     }
-
-    // Aggregate: one entry per season, containing all quality mirrors
-    val seasonMirrorsMap: MutableMap<Int, MutableList<MirrorLink>> = mutableMapOf()
 
     for (header in seasonHeaders) {
         val headerText = header.text()
-        val seasonMatch = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE).find(headerText)
-        val season = seasonMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
+        val season = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
+            .find(headerText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
         val quality = extractQualityFromHeader(headerText)
         val size = extractSizeFromHeader(headerText)
 
         val nextEl = header.nextElementSibling()
         val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else header.select("a")
-
-        val downloadLink = links.firstOrNull {
+        val dl = links.firstOrNull {
             it.text().contains("Download", true) || it.text().contains("V-Cloud", true)
         } ?: continue
 
-        val mirrors = fetchMirrorsFromDownloadPage(downloadLink.attr("href"), quality, size)
+        val mirrors = fetchMirrorsFromDownloadPage(dl.attr("href"), quality, size)
         seasonMirrorsMap.getOrPut(season) { mutableListOf() }.addAll(mirrors)
     }
 
-    // One CloudStream episode per season — no fake episode numbering
-    for ((season, mirrors) in seasonMirrorsMap) {
-        episodes.add(newEpisode(mirrors) {
-            this.name = "Season $season (Complete)"
-            this.season = season
-            this.episode = 1
-        })
+    // Use real episode list from Cinemeta if available
+    val episodeList = responseData?.meta?.videos ?: emptyList()
+    val episodes = mutableListOf<Episode>()
+
+    if (episodeList.isNotEmpty()) {
+        for (ep in episodeList) {
+            val seasonMirrors = seasonMirrorsMap[ep.season] ?: emptyList()
+            if (seasonMirrors.isEmpty()) continue
+            episodes.add(newEpisode(seasonMirrors) {
+                this.name = ep.name ?: ep.title ?: "Episode ${ep.episode}"
+                this.season = ep.season
+                this.episode = ep.episode
+                this.posterUrl = ep.thumbnail
+                this.description = ep.overview
+            })
+        }
+    } else {
+        for ((season, mirrors) in seasonMirrorsMap) {
+            episodes.add(newEpisode(mirrors) {
+                this.name = "Season $season (Complete)"
+                this.season = season
+                this.episode = 1
+            })
+        }
     }
 
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = posterUrl
-                this.plot = description
-                this.tags = genre
-                this.score = Score.from10(imdbRating)
-                this.year = year.toIntOrNull()
-                this.backgroundPosterUrl = background
-                addActors(cast)
-            }
-        } else {
+    newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        this.posterUrl = posterUrl
+        this.plot = description
+        this.tags = genre
+        this.score = Score.from10(imdbRating)
+        this.year = year.toIntOrNull()
+        this.backgroundPosterUrl = background
+        addActors(cast)
+    }
+} else {
             val allMirrors = mutableListOf<MirrorLink>()
 
             val qualityHeaders = document.select("h3, h4, h5, .entry-title, .quality-title").filter {
