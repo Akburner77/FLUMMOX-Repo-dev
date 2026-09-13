@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-// dev test
+
 package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.*
@@ -68,7 +68,7 @@ data class MirrorLink(
 
 open class VegaMoviesProvider : MainAPI() {
     override var mainUrl = "https://vegamovies.mq"
-    override var name = "BingeCloud"
+    override var name = "BingeCloud-DEV"
     override val hasMainPage = true
     override var lang = "en"
     override val hasDownloadSupport = true
