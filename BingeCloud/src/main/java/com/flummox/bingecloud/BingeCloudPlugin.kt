@@ -25,6 +25,8 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class BingeCloudPlugin : Plugin() {
     override fun load(context: Context) {
+        BingeCloudCtx.context = context
+
         registerMainAPI(BingeCloudProvider())
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
