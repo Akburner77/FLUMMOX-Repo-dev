@@ -3,6 +3,9 @@ package com.flummox.bingecloud
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.api.Log
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -229,23 +232,29 @@ private suspend fun moviesdriveExtractMovie(pageUrl: String): List<ScrapedMirror
 
         Log.d("BingeCloud", "MD movie: ${pairs.size} archives to fetch")
 
-        pairs.amap { (quality, archiveUrl) ->
-            try {
-                val archive = app.get(archiveUrl).document
-                val hubs = archive.select("a[href*='hubcloud'], a[href*='gdflix'], a[href*='gdirect']")
-                hubs.forEach { a ->
-                    val href = a.attr("href")
-                    val label = when {
-                        href.contains("hubcloud", true) -> "HubCloud"
-                        href.contains("gdflix", true) -> "GDFlix"
-                        href.contains("gdirect", true) -> "G-Direct"
-                        else -> "Direct"
+        coroutineScope {
+            pairs.map { pair ->
+                async {
+                    val quality = pair.first
+                    val archiveUrl = pair.second
+                    try {
+                        val archive = app.get(archiveUrl).document
+                        val hubs = archive.select("a[href*='hubcloud'], a[href*='gdflix'], a[href*='gdirect']")
+                        hubs.forEach { a ->
+                            val href = a.attr("href")
+                            val label = when {
+                                href.contains("hubcloud", true) -> "HubCloud"
+                                href.contains("gdflix", true) -> "GDFlix"
+                                href.contains("gdirect", true) -> "G-Direct"
+                                else -> "Direct"
+                            }
+                            out.add(ScrapedMirror(quality, label, href, "MD"))
+                        }
+                    } catch (e: Exception) {
+                        Log.e("BingeCloud", "MD archive failed: ${e.message}")
                     }
-                    out.add(ScrapedMirror(quality, label, href, "MD"))
                 }
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "MD archive failed: ${e.message}")
-            }
+            }.awaitAll()
         }
     } catch (e: Exception) {
         Log.e("BingeCloud", "MD movie extract failed: ${e.message}")
@@ -285,41 +294,47 @@ private suspend fun moviesdriveExtractSeries(pageUrl: String, season: Int, episo
 
         Log.d("BingeCloud", "MD series S${season}E${episode}: ${pairs.size} archives")
 
-        pairs.amap { (quality, archiveUrl) ->
-            try {
-                val archive = app.get(archiveUrl).document
-                val epHeaders = archive.select("h5").filter {
-                    Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE).containsMatchIn(it.text())
-                }
-                for (eph in epHeaders) {
-                    val epNum = Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE)
-                        .find(eph.text())?.groupValues?.get(1)?.toIntOrNull() ?: continue
-                    if (epNum != episode) continue
-                    var next = eph.nextElementSibling()
-                    var step = 0
-                    while (next != null && step < 3) {
-                        val link = next.selectFirst("a[href*='hubcloud'], a[href*='gdflix'], a[href*='gdirect']")
-                        if (link != null) {
-                            val href = link.attr("href")
-                            val label = when {
-                                href.contains("hubcloud", true) -> "HubCloud"
-                                href.contains("gdflix", true) -> "GDFlix"
-                                href.contains("gdirect", true) -> "G-Direct"
-                                else -> "Direct"
+        coroutineScope {
+            pairs.map { pair ->
+                async {
+                    val quality = pair.first
+                    val archiveUrl = pair.second
+                    try {
+                        val archive = app.get(archiveUrl).document
+                        val epHeaders = archive.select("h5").filter {
+                            Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE).containsMatchIn(it.text())
+                        }
+                        for (eph in epHeaders) {
+                            val epNum = Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE)
+                                .find(eph.text())?.groupValues?.get(1)?.toIntOrNull() ?: continue
+                            if (epNum != episode) continue
+                            var next = eph.nextElementSibling()
+                            var step = 0
+                            while (next != null && step < 3) {
+                                val link = next.selectFirst("a[href*='hubcloud'], a[href*='gdflix'], a[href*='gdirect']")
+                                if (link != null) {
+                                    val href = link.attr("href")
+                                    val label = when {
+                                        href.contains("hubcloud", true) -> "HubCloud"
+                                        href.contains("gdflix", true) -> "GDFlix"
+                                        href.contains("gdirect", true) -> "G-Direct"
+                                        else -> "Direct"
+                                    }
+                                    out.add(ScrapedMirror(quality, label, href, "MD"))
+                                    break
+                                }
+                                if (next.tagName() == "h5" &&
+                                    Regex("""Ep\s*0*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(next.text())) break
+                                next = next.nextElementSibling()
+                                step++
                             }
-                            out.add(ScrapedMirror(quality, label, href, "MD"))
                             break
                         }
-                        if (next.tagName() == "h5" &&
-                            Regex("""Ep\s*0*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(next.text())) break
-                        next = next.nextElementSibling()
-                        step++
+                    } catch (e: Exception) {
+                        Log.e("BingeCloud", "MD archive failed: ${e.message}")
                     }
-                    break
                 }
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "MD archive failed: ${e.message}")
-            }
+            }.awaitAll()
         }
     } catch (e: Exception) {
         Log.e("BingeCloud", "MD series extract failed: ${e.message}")
