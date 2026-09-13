@@ -343,6 +343,117 @@ private suspend fun moviesdriveExtractSeries(pageUrl: String, season: Int, episo
 }
 
 // ═══════════════════════════════════════════
+//  HDhub4u
+// ═══════════════════════════════════════════
+private suspend fun hdhub4uFindPage(title: String, year: String, type: String): String? {
+    val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
+    return try {
+        val html = app.get("$domain/?s=${URLEncoder.encode(title, "UTF-8")}").text
+        val doc = org.jsoup.Jsoup.parse(html)
+        val cards = doc.select("li.thumb")
+        var bestUrl: String? = null
+        var bestScore = 0
+        for (card in cards) {
+            val alt = card.selectFirst("figcaption p")?.text()
+                ?: card.selectFirst("img")?.attr("alt") ?: continue
+            val href = card.selectFirst("a")?.attr("href") ?: continue
+            if (href.isEmpty()) continue
+            if (!titleMatches(title, alt)) continue
+            var score = 1
+            if (year.isNotBlank() && alt.contains(year)) score += 2
+            val lower = alt.lowercase()
+            if (type == "series" && (lower.contains("season") || lower.contains("series"))) score += 2
+            if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
+            if (score > bestScore) {
+                bestScore = score
+                bestUrl = href
+            }
+        }
+        bestUrl
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "HDH search failed: ${e.message}")
+        null
+    }
+}
+
+private suspend fun hdhub4uExtractMovie(pageUrl: String): List<ScrapedMirror> {
+    val out = mutableListOf<ScrapedMirror>()
+    try {
+        val doc = app.get(pageUrl).document
+        // Find all quality-labeled anchors anywhere in the page body
+        val body = doc.select("main, .page-body, article").first() ?: doc
+        val anchors = body.select("a[href]")
+
+        for (a in anchors) {
+            val href = a.attr("href").trim()
+            if (href.isEmpty() || href.startsWith("#")) continue
+            if (!href.startsWith("http")) continue
+            val text = a.text().lowercase()
+            // Skip junk links
+            if (href.contains("4khdhub.one/") && !text.contains("avc") && !text.contains("hevc")) continue
+            if (href.contains("t.me/") || href.contains("whatsapp") || href.contains("telegram")) continue
+            if (href.contains("hdhub4u.") && href.contains("/category/")) continue
+
+            // Extract quality from anchor text
+            val quality = Regex("""(\d{3,4}[pP])""").find(text)?.value
+                ?: if (text.contains("4k") || text.contains("2160")) "2160p" else null
+
+            // Classify and resolve
+            val resolved = resolveHdhub4uLink(href)
+            if (resolved != null) {
+                val (mirrorUrl, mirrorName) = resolved
+                out.add(ScrapedMirror(quality ?: "Unknown", mirrorName, mirrorUrl, "HDH"))
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "HDH movie extract failed: ${e.message}")
+    }
+    return out
+}
+
+private suspend fun hdhub4uExtractSeries(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> {
+    // HDhub4u series page usually has one page per season.
+    // Extract quality-labeled anchors and their following HubCloud links.
+    return hdhub4uExtractMovie(pageUrl)
+}
+
+private suspend fun resolveHdhub4uLink(url: String): Pair<String, String>? {
+    return try {
+        when {
+            // Direct HubCloud link
+            url.contains("hubcloud.ist/drive/") || url.contains("hubcloud.cx/drive/") ->
+                url to "HubCloud"
+
+            // Wrapper: hubdrive.sbs, hubdrive.tips, hubcdn.lol, hubcdn.sbs, hblinks.co, 4khdhub.one
+            url.contains("hubdrive.", true) && url.contains("/file/") -> {
+                val doc = app.get(url).document
+                val hub = doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")
+                hub?.attr("href")?.let { it to "HubCloud" }
+            }
+            url.contains("hubcdn.", true) && url.contains("/file/") -> {
+                val doc = app.get(url).document
+                val hub = doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")
+                hub?.attr("href")?.let { it to "HubCloud" }
+            }
+            url.contains("hblinks.co/archives/") -> {
+                val doc = app.get(url).document
+                val hub = doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")
+                hub?.attr("href")?.let { it to "HubCloud" }
+            }
+            url.contains("4khdhub.one/") -> {
+                val doc = app.get(url).document
+                val hub = doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")
+                hub?.attr("href")?.let { it to "HubCloud" }
+            }
+            else -> null
+        }
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "HDH resolve failed for $url: ${e.message}")
+        null
+    }
+}
+
+// ═══════════════════════════════════════════
 //  Entry
 // ═══════════════════════════════════════════
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
