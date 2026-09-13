@@ -1,7 +1,7 @@
 name: Build & Publish
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, dev ]
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -16,9 +16,18 @@ jobs:
         with:
           path: src
 
+      - name: Determine output branch
+        id: out
+        run: |
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "branch=builds-dev" >> $GITHUB_OUTPUT
+          else
+            echo "branch=builds" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v4
         with:
-          ref: builds
+          ref: ${{ steps.out.outputs.branch }}
           path: builds
 
       - uses: actions/setup-java@v4
@@ -51,6 +60,7 @@ jobs:
       - name: Patch plugins.json URL and bump version
         env:
           NEW_VERSION: 102
+          OUTPUT_BRANCH: ${{ steps.out.outputs.branch }}
         run: python3 src/scripts/patch_plugins.py
 
       - name: Push to builds branch
@@ -60,4 +70,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Build $(date +%s)" || echo "no changes"
-          git push origin builds --force
+          git push origin HEAD:${{ steps.out.outputs.branch }} --force
