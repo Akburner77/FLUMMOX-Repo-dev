@@ -340,49 +340,32 @@ if (imdbId.isNotEmpty()) {
         Regex("""\[([^\]]*(?:MB|GB)[^\]]*)\]""").find(header)?.groupValues?.getOrNull(1) ?: ""
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val mirrors = try {
-            parseJson<List<MirrorLink>>(data)
-        } catch (e: Exception) {
-            Log.e("BingeCloud", "Failed to parse mirrors: ${e.message}")
-            return false
-        }
-
-        Log.d("BingeCloud", "loadLinks: ${mirrors.size} mirrors")
-
-        mirrors.amap { mirror ->
-    val seSuffix = if (mirror.season > 0) " S${mirror.season} E${mirror.episode}" else ""
-    val prefix = if (mirror.showName.isNotBlank()) "${mirror.showName}$seSuffix · " else ""
-
-    val wrapped: (ExtractorLink) -> Unit = { link ->
-        callback.invoke(
-            newExtractorLink(
-                source = link.source,
-                name = "$prefix${link.name}",
-                url = link.url,
-                type = link.type
-            ) {
-                this.quality = link.quality
-                this.referer = link.referer
-            }
-        )
-    }
-
-    try {
-        when (mirror.mirror) {
-            "V-Cloud" -> VCloud().getUrl(mirror.url, "", subtitleCallback, wrapped)
-            "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, wrapped)
-            "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, wrapped)
-            else -> loadExtractor(mirror.url, "", subtitleCallback, wrapped)
-        }
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val mirrors = try {
+        parseJson<List<MirrorLink>>(data)
     } catch (e: Exception) {
-        Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
+        Log.e("BingeCloud", "Failed to parse mirrors: ${e.message}")
+        return false
     }
+
+    Log.d("BingeCloud", "loadLinks: ${mirrors.size} mirrors")
+
+    mirrors.amap { mirror ->
+        try {
+            when (mirror.mirror) {
+                "V-Cloud" -> VCloud().getUrl(mirror.url, "", subtitleCallback, callback)
+                "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
+                "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
+                else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
+            }
+        } catch (e: Exception) {
+            Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
         }
-        return true
+    }
+    return true
     }
 }
