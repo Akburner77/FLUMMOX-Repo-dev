@@ -211,7 +211,11 @@ if (imdbId.isNotEmpty()) {
                 this.name = ep.name ?: ep.title ?: "Episode ${ep.episode}"
                 this.season = ep.season
                 this.episode = ep.episode
-                this.posterUrl = if (!ep.thumbnail.isNullOrBlank()) ep.thumbnail else posterUrl
+                this.posterUrl = when {
+                    !ep.thumbnail.isNullOrBlank() -> ep.thumbnail
+                    !background.isNullOrBlank() -> background
+                    else -> posterUrl
+                }
                 this.description = ep.overview
            })
         }
