@@ -223,9 +223,10 @@ val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
 
         val episodes = episodesMap.map { (key, urls) ->
             newEpisode(urls.map { MdEpisodeLink(it) }) {
-                this.name = "S${key.first} E${key.second}"
-                this.season = key.first
-                this.episode = key.second
+               this.name = "S${key.first} E${key.second}"
+               this.season = key.first
+               this.episode = key.second
+               this.posterUrl = background
             }
         }
 
