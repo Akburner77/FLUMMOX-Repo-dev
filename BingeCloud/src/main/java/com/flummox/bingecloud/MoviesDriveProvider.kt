@@ -113,6 +113,7 @@ open class MoviesDriveProvider : MainAPI() {
         var imdbRating = ""
         var year = ""
         var background = posterUrl
+        var metaStatus: String? = null
 
         if (imdbId.isNotEmpty()) {
             val jsonRes = app.get("$aiometaUrl/${if (isSeries) "series" else "movie"}/$imdbId.json").text
@@ -125,13 +126,15 @@ open class MoviesDriveProvider : MainAPI() {
                 year = meta.year ?: ""
                 posterUrl = meta.poster ?: posterUrl
                 background = meta.background ?: background
+                metaStatus = meta.status
             }
+            
         }
 
         return if (isSeries) {
-            loadSeries(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl)
-        } else {
-            loadMovie(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl)
+                loadSeries(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl, metaStatus)
+            } else {
+                loadMovie(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl, metaStatus)
         }
     }
 
@@ -139,7 +142,7 @@ open class MoviesDriveProvider : MainAPI() {
         document: org.jsoup.nodes.Document, title: String, url: String,
         posterUrl: String, description: String, cast: List<Actor>,
         genre: List<String>, imdbRating: String, year: String,
-        background: String, imdbUrl: String
+        background: String, imdbUrl: String, metaStatus: String?
     ): LoadResponse? {
         val buttons = document.select("h5 > a")
         val sources = mutableListOf<MdEpisodeLink>()
@@ -174,7 +177,7 @@ val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
         document: org.jsoup.nodes.Document, title: String, url: String,
         posterUrl: String, description: String, cast: List<Actor>,
         genre: List<String>, imdbRating: String, year: String,
-        background: String, imdbUrl: String
+        background: String, imdbUrl: String, metaStatus: String?
     ): LoadResponse? {
         val episodesMap: MutableMap<Pair<Int, Int>, MutableList<String>> = mutableMapOf()
         val buttons = document.select("h5 > a").filter { !it.text().contains("Zip", true) }
@@ -226,10 +229,17 @@ val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
             }
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        val statusTag = when {
+             metaStatus?.contains("Ended", true) == true -> "Completed"
+             metaStatus?.contains("Returning", true) == true -> "Ongoing"
+        else -> ""
+     }
+     val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+
+     return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = posterUrl
             this.plot = description
-            this.tags = genre
+            this.tags = tagsWithStatus
             this.score = Score.from10(imdbRating)
             this.year = year.toIntOrNull()
             this.backgroundPosterUrl = background
