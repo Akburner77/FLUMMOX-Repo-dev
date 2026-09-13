@@ -50,7 +50,7 @@ jobs:
 
       - name: Patch plugins.json URL and bump version
         env:
-          NEW_VERSION: 100
+          NEW_VERSION: 101
         run: python3 src/scripts/patch_plugins.py
 
       - name: Push to builds branch
