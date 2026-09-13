@@ -23,53 +23,29 @@ open class BingeCloudProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
-    private data class RowSpec(
-    val type: String,
-    val catalogId: String,
-    val name: String,
-    val settingsKey: String,
-    val defaultGenre: String? = null
-)
-
-private val allRows = listOf(
-    RowSpec("movie", "tmdb.trending", "Trending Movies", Settings.K_ROW_TRENDING_MOVIES),
-    RowSpec("series", "tmdb.trending", "Trending Series", Settings.K_ROW_TRENDING_SERIES),
-    RowSpec("movie", "tmdb.top", "Popular Movies", Settings.K_ROW_POPULAR_MOVIES),
-    RowSpec("series", "tmdb.top", "Popular Series", Settings.K_ROW_POPULAR_SERIES),
-    RowSpec("movie", "tvdb.trending", "TVDB Trending Movies", Settings.K_ROW_TVDB_MOVIES, "Action"),
-    RowSpec("series", "tvdb.trending", "TVDB Trending Series", Settings.K_ROW_TVDB_SERIES, "Action"),
-    RowSpec("anime", "mal.top_anime", "Top Anime", Settings.K_ROW_TOP_ANIME),
-    RowSpec("anime", "mal.airing", "Airing Now", Settings.K_ROW_AIRING_ANIME),
-    RowSpec("anime", "mal.upcoming", "Upcoming Anime", Settings.K_ROW_UPCOMING_ANIME),
-    RowSpec("anime", "mal.top_movies", "Top Anime Movies", Settings.K_ROW_TOP_ANIME_MOVIES),
-    RowSpec("anime", "mal.top_series", "Top Anime Series", Settings.K_ROW_TOP_ANIME_SERIES),
-    RowSpec("anime", "mal.most_popular", "Most Popular Anime", Settings.K_ROW_MOST_POPULAR_ANIME),
-    RowSpec("anime", "mal.most_favorites", "Most Favorited Anime", Settings.K_ROW_MOST_FAV_ANIME),
-    RowSpec("anime", "mal.20sDecade", "Best of 2020s", Settings.K_ROW_BEST_2020S, "Action"),
-)
-
-override val mainPage = mainPageOf(
-    *allRows
-        .filter { Settings.isRowEnabled(it.settingsKey) }
-        .map { row ->
-            val id = if (row.defaultGenre != null)
-                "${row.catalogId}$ROW_TAG${row.defaultGenre}"
-            else row.catalogId
-            "${row.type}$ROW_TAG$id$ROW_TAG${row.name}" to row.name
-        }
-        .toTypedArray()
-)
+    override val mainPage = mainPageOf(
+        *Settings.getRowOrder()
+            .mapNotNull { key ->
+                val spec = Settings.getRowSpecByKey(key) ?: return@mapNotNull null
+                if (!Settings.isRowEnabled(key)) return@mapNotNull null
+                val id = if (spec.defaultGenre != null)
+                    "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
+                else spec.catalogId
+                "${spec.type}$ROW_TAG$id$ROW_TAG${spec.name}" to spec.name
+            }
+            .toTypedArray()
+    )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-    val parts = request.data.split(ROW_TAG)
-    if (parts.size < 2) return null
-    val type = parts[0]
-    val catalogId = parts[1]
-    val genre = parts.getOrNull(2)
-    val skip = (page - 1) * 25
-    val metas = aioFetchCatalog(type, catalogId, genre, skip)
-    val items = metas.mapNotNull { it.toSearchResponse() }
-    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        val parts = request.data.split(ROW_TAG)
+        if (parts.size < 2) return null
+        val type = parts[0]
+        val catalogId = parts[1]
+        val genre = parts.getOrNull(2)
+        val skip = (page - 1) * 25
+        val metas = aioFetchCatalog(type, catalogId, genre, skip)
+        val items = metas.mapNotNull { it.toSearchResponse() }
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
@@ -121,7 +97,6 @@ override val mainPage = mainPageOf(
         } ?: emptyList()
 
         val videos = meta.videos ?: emptyList()
-
         val statusTag = computeStatusTag(meta, videos, tvType)
         val desc = meta.description ?: ""
         val plotWithStatus = if (statusTag.isNotBlank() && desc.isNotBlank())
@@ -193,34 +168,42 @@ override val mainPage = mainPageOf(
             Log.d("BingeCloud", "No mirrors found")
             return false
         }
-val sorted = mirrors.sortedByDescending { qualityRank(it.quality) }
-val concurrency = Settings.getConcurrency().coerceIn(1, 50)
-Log.d("BingeCloud", "loadLinks: ${sorted.size} raw mirrors — resolving (concurrency=$concurrency)")
 
-val sem = Semaphore(concurrency)
-coroutineScope {
-    sorted.map { m ->
-        async {
-            sem.withPermit {
-                try {
-                    val finalUrl = resolveWrapper(m.url)
-                    if (finalUrl != null) {
-                        VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
-                    } else {
-                        Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
+        val pref = Settings.getQualityPref()
+        val prefRank = qualityRank(pref)
+        val sorted = mirrors.sortedWith(
+            compareByDescending<ScrapedMirror> {
+                if (prefRank > 0 && qualityRank(it.quality) == prefRank) 1 else 0
+            }.thenByDescending { qualityRank(it.quality) }
+        )
+        val concurrency = Settings.getConcurrency().coerceIn(1, 50)
+        Log.d("BingeCloud", "loadLinks: ${sorted.size} mirrors — concurrency=$concurrency")
+
+        val sem = Semaphore(concurrency)
+        coroutineScope {
+            sorted.map { m ->
+                async {
+                    sem.withPermit {
+                        try {
+                            val finalUrl = resolveWrapper(m.url)
+                            if (finalUrl != null) {
+                                VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                            } else {
+                                Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
+                        }
                     }
-                } catch (e: Exception) {
-                    Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
                 }
-            }
+            }.awaitAll()
         }
-    }.awaitAll()
-}
-return true
+        return true
     }
 
     private fun qualityRank(q: String): Int = when {
         q.contains("2160", true) || q.contains("4k", true) -> 2160
+        q.contains("1440", true) || q.contains("2k", true) -> 1440
         q.contains("1080", true) -> 1080
         q.contains("720", true) -> 720
         q.contains("480", true) -> 480
