@@ -1,6 +1,7 @@
 package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.utils.*
 import com.lagradost.api.Log
 import org.json.JSONObject
 import org.jsoup.nodes.Element
