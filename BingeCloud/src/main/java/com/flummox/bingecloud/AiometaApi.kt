@@ -1,0 +1,102 @@
+package com.flummox.bingecloud
+
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
+import java.net.URLEncoder
+
+const val AIOMETA_BASE = "https://aiometadata.elfhosted.com/stremio/9197a4a9-2f5b-4911-845e-8704c520bdf7"
+
+data class AioCast(
+    val name: String? = null,
+    val character: String? = null,
+    val photo: String? = null
+)
+
+data class AioVideo(
+    val id: String? = null,
+    val title: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val thumbnail: String? = null,
+    val overview: String? = null,
+    val released: String? = null,
+    val runtime: String? = null,
+    val available: Boolean? = null
+)
+
+data class AioAppExtras(
+    val seasonPosters: List<String?>? = null,
+    val certification: String? = null,
+    val cast: List<AioCast>? = null
+)
+
+data class AioMeta(
+    val id: String? = null,
+    val name: String? = null,
+    val type: String? = null,
+    val description: String? = null,
+    val poster: String? = null,
+    val background: String? = null,
+    val logo: String? = null,
+    val landscapePoster: String? = null,
+    val genres: List<String>? = null,
+    val imdbRating: String? = null,
+    val releaseInfo: String? = null,
+    val released: String? = null,
+    val runtime: String? = null,
+    val year: String? = null,
+    val country: String? = null,
+    val imdb_id: String? = null,
+    val videos: List<AioVideo>? = null,
+    val app_extras: AioAppExtras? = null
+)
+
+data class AioMetaResponse(val meta: AioMeta? = null)
+data class AioCatalogResponse(val metas: List<AioMeta>? = null)
+
+suspend fun aioFetchMeta(type: String, id: String): AioMeta? {
+    return try {
+        val url = "$AIOMETA_BASE/meta/$type/$id.json"
+        val json = app.get(url).text
+        tryParseJson<AioMetaResponse>(json)?.meta
+    } catch (e: Exception) {
+        null
+    }
+}
+
+suspend fun aioFetchCatalog(
+    type: String,
+    catalogId: String,
+    genre: String? = null,
+    skip: Int = 0
+): List<AioMeta> {
+    return try {
+        val extras = StringBuilder()
+        if (!genre.isNullOrBlank()) {
+            extras.append("genre=").append(URLEncoder.encode(genre, "UTF-8")).append("&")
+        }
+        extras.append("skip=").append(skip)
+
+        val url = "$AIOMETA_BASE/catalog/$type/$catalogId/$extras.json"
+        val json = app.get(url).text
+        tryParseJson<AioCatalogResponse>(json)?.metas ?: emptyList()
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+
+suspend fun aioSearch(query: String, type: String): List<AioMeta> {
+    return try {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val catalogId = when (type) {
+            "movie" -> "search.movie"
+            "series" -> "search.series"
+            else -> "search.$type"
+        }
+        val url = "$AIOMETA_BASE/catalog/$type/$catalogId/search=$encoded.json"
+        val json = app.get(url).text
+        tryParseJson<AioCatalogResponse>(json)?.metas ?: emptyList()
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
