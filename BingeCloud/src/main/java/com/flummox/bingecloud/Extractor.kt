@@ -120,7 +120,7 @@ open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
             baseUrl = latestBaseUrl
         }
 
-        val doc = app.get(newUrl).document
+        val doc = cloudflareGetDoc(newUrl) ?: return
         var link = if (newUrl.contains("/video/")) {
             doc.selectFirst("div.vd > center > a")?.attr("href") ?: ""
         } else {
@@ -134,7 +134,7 @@ open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
 
         if (!link.startsWith("https://")) link = baseUrl + link
 
-        val document = app.get(link).document
+        val document = cloudflareGetDoc(link) ?: return
         val header = document.select("div.card-header").text()
         val quality = getIndexQuality(header)
         val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p"
