@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.api.Log
 import org.json.JSONObject
+import java.util.Calendar
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
@@ -17,7 +18,6 @@ open class BingeCloudProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
-    // (type, catalogId, displayName)
     private val rows = listOf(
         Triple("movie", "tmdb.trending", "Trending Movies"),
         Triple("series", "tmdb.trending", "Trending Series"),
@@ -94,6 +94,14 @@ open class BingeCloudProvider : MainAPI() {
 
         val videos = meta.videos ?: emptyList()
 
+        val statusTag = computeStatusTag(meta, videos, tvType)
+        val desc = meta.description ?: ""
+        val plotWithStatus = if (statusTag.isNotBlank() && desc.isNotBlank())
+            "<b>$statusTag</b><br><br>$desc"
+        else if (statusTag.isNotBlank())
+            "<b>$statusTag</b>"
+        else desc
+
         return if (tvType == TvType.Movie && videos.isEmpty()) {
             val q = StreamQuery(
                 title = name,
@@ -104,7 +112,7 @@ open class BingeCloudProvider : MainAPI() {
             newMovieLoadResponse(name, url, TvType.Movie, encodeQuery(q)) {
                 this.posterUrl = meta.poster
                 this.backgroundPosterUrl = meta.background
-                this.plot = meta.description
+                this.plot = plotWithStatus
                 this.year = yearInt
                 this.tags = meta.genres
                 this.score = Score.from10(meta.imdbRating)
@@ -134,7 +142,7 @@ open class BingeCloudProvider : MainAPI() {
             newTvSeriesLoadResponse(name, url, responseType, episodes) {
                 this.posterUrl = meta.poster
                 this.backgroundPosterUrl = meta.background
-                this.plot = meta.description
+                this.plot = plotWithStatus
                 this.year = yearInt
                 this.tags = meta.genres
                 this.score = Score.from10(meta.imdbRating)
@@ -180,6 +188,19 @@ open class BingeCloudProvider : MainAPI() {
         q.contains("480", true) -> 480
         q.contains("360", true) -> 360
         else -> 0
+    }
+
+    private fun computeStatusTag(meta: AioMeta, videos: List<AioVideo>, tvType: TvType): String {
+        if (tvType == TvType.Movie) return ""
+        val rel = meta.releaseInfo ?: ""
+        if (rel.endsWith("-")) return "Ongoing"
+        if (rel.matches(Regex("""\d{4}-\d{4}"""))) return "Completed"
+        val lastEp = videos.lastOrNull()
+        if (lastEp?.available == false) return "Ongoing"
+        val year = rel.take(4).toIntOrNull()
+        val nowYear = Calendar.getInstance().get(Calendar.YEAR)
+        if (year != null && year < nowYear - 1) return "Completed"
+        return ""
     }
 }
 
