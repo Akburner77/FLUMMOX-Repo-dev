@@ -1,19 +1,28 @@
 package com.flummox.bingecloud
 
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.text.InputType
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
-import androidx.appcompat.app.AlertDialog
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.CompoundButton
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.Spinner
+import android.widget.Switch
+import android.widget.TextView
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
 object Settings {
 
-    // ── Persistence keys ──
     const val K_CONCURRENCY = "bingecloud_concurrency"
     const val K_CF_ENABLED = "bingecloud_cf_enabled"
     const val K_CF_DOMAINS = "bingecloud_cf_domains"
@@ -57,7 +66,6 @@ object Settings {
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
     fun isRowEnabled(key: String): Boolean = getKey<Boolean>(key) ?: true
 
-    // ── UI ──
     private const val BG = 0xFF0F0F14.toInt()
     private const val CARD_BG = 0xFF1A1A22.toInt()
     private const val ACCENT = 0xFF818CF8.toInt()
@@ -74,11 +82,9 @@ object Settings {
 
         root.addView(header(ctx, "BingeCloud Settings"))
 
-        // ── Performance ──
         root.addView(section(ctx, "⚡  Performance"))
         root.addView(sliderRow(ctx, "Concurrency", 1, 50, getConcurrency()) { setKey(K_CONCURRENCY, it) })
 
-        // ── Cloudflare ──
         root.addView(section(ctx, "🛡️  Cloudflare Bypass"))
         root.addView(toggleRow(ctx, "Enable bypass", isCfEnabled()) { setKey(K_CF_ENABLED, it) })
         root.addView(editRow(ctx, "Domains (comma-separated)",
@@ -88,11 +94,9 @@ object Settings {
         root.addView(buttonRow(ctx, "🌐 Open FebBox", "https://www.febbox.com"))
         root.addView(buttonRow(ctx, "🌐 Open HubCloud", "https://hubcloud.ist"))
 
-        // ── FebBox Account ──
         root.addView(section(ctx, "🔑  FebBox Account"))
-        root.addView(editRow(ctx, "Email", getFebBoxEmail(), InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS) {
-            setKey(K_FEBBOX_EMAIL, it)
-        })
+        root.addView(editRow(ctx, "Email", getFebBoxEmail(),
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS) { setKey(K_FEBBOX_EMAIL, it) })
         root.addView(editRow(ctx, "Password", getFebBoxPassword(),
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD) {
             setKey(K_FEBBOX_PASSWORD, it)
@@ -100,22 +104,18 @@ object Settings {
         val token = getFebBoxToken()
         root.addView(labelRow(ctx,
             if (token.isBlank()) "Token: not set"
-            else "Token: ${token.take(12)}...",
-            SUBTEXT))
+            else "Token: ${token.take(12)}...", SUBTEXT))
 
-        // ── Sources ──
         root.addView(section(ctx, "📡  Sources"))
         root.addView(toggleRow(ctx, "VegaMovies", isSrcVm()) { setKey(K_SRC_VM, it) })
         root.addView(toggleRow(ctx, "MoviesDrive", isSrcMd()) { setKey(K_SRC_MD, it) })
         root.addView(toggleRow(ctx, "HDhub4u", isSrcHdh()) { setKey(K_SRC_HDH, it) })
         root.addView(toggleRow(ctx, "FebBox", isSrcFebBox()) { setKey(K_SRC_FEBBOX, it) })
 
-        // ── Quality ──
         root.addView(section(ctx, "🎞️  Preferred Quality"))
         val qualities = listOf("Auto", "480p", "720p", "1080p", "1440p", "2160p")
         root.addView(dropdownRow(ctx, qualities, getQualityPref()) { setKey(K_QUALITY, it) })
 
-        // ── Home Rows ──
         root.addView(section(ctx, "🏠  Home Rows"))
         root.addView(toggleRow(ctx, "Trending Movies", isRowEnabled(K_ROW_TRENDING_MOVIES)) { setKey(K_ROW_TRENDING_MOVIES, it) })
         root.addView(toggleRow(ctx, "Trending Series", isRowEnabled(K_ROW_TRENDING_SERIES)) { setKey(K_ROW_TRENDING_SERIES, it) })
@@ -133,7 +133,6 @@ object Settings {
             .show()
     }
 
-    // ── UI helpers ──
     private fun header(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text
         setTextColor(TEXT)
@@ -155,21 +154,23 @@ object Settings {
         setPadding(16, 6, 16, 6)
     }
 
-    private fun toggleRow(ctx: Context, label: String, initial: Boolean, onChange: (Boolean) -> Unit): LinearLayout =
-        LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(16, 14, 16, 14)
-            addView(TextView(ctx).apply {
-                text = label
-                setTextColor(TEXT)
-                textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            addView(Switch(ctx).apply {
-                isChecked = initial
-                setOnCheckedChangeListener { _, v -> onChange(v) }
-            })
-        }
+    private fun toggleRow(
+        ctx: Context, label: String, initial: Boolean,
+        onChange: (Boolean) -> Unit
+    ): LinearLayout = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(16, 14, 16, 14)
+        addView(TextView(ctx).apply {
+            text = label
+            setTextColor(TEXT)
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        val sw = Switch(ctx)
+        sw.isChecked = initial
+        sw.setOnCheckedChangeListener { _: CompoundButton, v: Boolean -> onChange(v) }
+        addView(sw)
+    }
 
     private fun sliderRow(
         ctx: Context, label: String, min: Int, max: Int, initial: Int,
@@ -183,19 +184,19 @@ object Settings {
             textSize = 14f
         }
         addView(title)
-        addView(SeekBar(ctx).apply {
-            this.max = max - min
-            progress = initial - min
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                    val v = p + min
-                    title.text = "$label: $v"
-                    if (fromUser) onChange(v)
-                }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
-            })
+        val seek = SeekBar(ctx)
+        seek.max = max - min
+        seek.progress = initial - min
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                val v = p + min
+                title.text = "$label: $v"
+                if (fromUser) onChange(v)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
+        addView(seek)
     }
 
     private fun editRow(
@@ -217,7 +218,9 @@ object Settings {
             setBackgroundColor(CARD_BG)
             this.inputType = inputType
             setPadding(24, 16, 24, 16)
-            setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) onChange(text.toString()) }
+            setOnFocusChangeListener { _: View, hasFocus: Boolean ->
+                if (!hasFocus) onChange(text.toString())
+            }
         })
     }
 
@@ -243,15 +246,16 @@ object Settings {
         onChange: (String) -> Unit
     ): LinearLayout = LinearLayout(ctx).apply {
         setPadding(16, 8, 16, 16)
-        addView(Spinner(ctx).apply {
-            adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, options)
-            setSelection(options.indexOf(initial).coerceAtLeast(0))
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                    onChange(options[pos])
-                }
-                override fun onNothingSelected(p: AdapterView<*>?) {}
+        val spinner = Spinner(ctx)
+        spinner.adapter = ArrayAdapter(ctx,
+            android.R.layout.simple_spinner_dropdown_item, options)
+        spinner.setSelection(options.indexOf(initial).coerceAtLeast(0))
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                onChange(options[pos])
             }
-        })
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        addView(spinner)
     }
 }
