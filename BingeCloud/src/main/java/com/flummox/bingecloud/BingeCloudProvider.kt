@@ -7,6 +7,8 @@ import com.lagradost.api.Log
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.util.Calendar
 
@@ -21,19 +23,25 @@ open class BingeCloudProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
-    private val rows = listOf(
-        Triple("movie", "tmdb.trending", "Trending Movies"),
-        Triple("series", "tmdb.trending", "Trending Series"),
-        Triple("movie", "tmdb.top", "Popular Movies"),
-        Triple("series", "tmdb.top", "Popular Series"),
-        Triple("anime", "mal.top_anime", "Top Anime"),
-        Triple("anime", "mal.airing", "Airing Now"),
-        Triple("anime", "mal.top_movies", "Top Anime Movies"),
-        Triple("anime", "mal.most_popular", "Most Popular Anime")
-    )
+    private val allRows = listOf(
+    Triple(Triple("movie", "tmdb.trending", "Trending Movies"), Settings.K_ROW_TRENDING_MOVIES, 0),
+    Triple(Triple("series", "tmdb.trending", "Trending Series"), Settings.K_ROW_TRENDING_SERIES, 0),
+    Triple(Triple("movie", "tmdb.top", "Popular Movies"), Settings.K_ROW_POPULAR_MOVIES, 0),
+    Triple(Triple("series", "tmdb.top", "Popular Series"), Settings.K_ROW_POPULAR_SERIES, 0),
+    Triple(Triple("anime", "mal.top_anime", "Top Anime"), Settings.K_ROW_TOP_ANIME, 0),
+    Triple(Triple("anime", "mal.airing", "Airing Now"), Settings.K_ROW_AIRING_ANIME, 0),
+    Triple(Triple("anime", "mal.top_movies", "Top Anime Movies"), Settings.K_ROW_TOP_ANIME_MOVIES, 0),
+    Triple(Triple("anime", "mal.most_popular", "Most Popular Anime"), Settings.K_ROW_MOST_POPULAR_ANIME, 0)
+)
 
     override val mainPage = mainPageOf(
-        *rows.map { (type, id, name) -> "$type$ROW_TAG$id$ROW_TAG$name" to name }.toTypedArray()
+    *allRows
+        .filter { (_, key, _) -> Settings.isRowEnabled(key) }
+        .map { (row, _, _) ->
+            val (type, id, name) = row
+            "$type$ROW_TAG$id$ROW_TAG$name" to name
+        }
+        .toTypedArray()
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
@@ -168,27 +176,30 @@ open class BingeCloudProvider : MainAPI() {
             Log.d("BingeCloud", "No mirrors found")
             return false
         }
+val sorted = mirrors.sortedByDescending { qualityRank(it.quality) }
+val concurrency = Settings.getConcurrency().coerceIn(1, 50)
+Log.d("BingeCloud", "loadLinks: ${sorted.size} raw mirrors — resolving (concurrency=$concurrency)")
 
-        val sorted = mirrors.sortedByDescending { qualityRank(it.quality) }
-        Log.d("BingeCloud", "loadLinks: ${sorted.size} raw mirrors — resolving in parallel")
-
-        coroutineScope {
-            sorted.map { m ->
-                async {
-                    try {
-                        val finalUrl = resolveWrapper(m.url)
-                        if (finalUrl != null) {
-                            VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
-                        } else {
-                            Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
-                        }
-                    } catch (e: Exception) {
-                        Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
+val sem = Semaphore(concurrency)
+coroutineScope {
+    sorted.map { m ->
+        async {
+            sem.withPermit {
+                try {
+                    val finalUrl = resolveWrapper(m.url)
+                    if (finalUrl != null) {
+                        VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                    } else {
+                        Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
                     }
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
                 }
-            }.awaitAll()
+            }
         }
-        return true
+    }.awaitAll()
+}
+return true
     }
 
     private fun qualityRank(q: String): Int = when {
