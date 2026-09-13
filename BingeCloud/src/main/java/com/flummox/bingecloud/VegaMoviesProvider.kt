@@ -60,7 +60,10 @@ data class MirrorLink(
     val quality: String,
     val size: String,
     val mirror: String,
-    val url: String
+    val url: String,
+    val season: Int = 0,
+    val episode: Int = 0,
+    val showName: String = ""
 )
 
 open class VegaMoviesProvider : MainAPI() {
