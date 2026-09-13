@@ -37,14 +37,10 @@ jobs:
 
       - name: Build plugins
         working-directory: src
-        env:
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: gradle make
 
       - name: Generate plugins.json
         working-directory: src
-        env:
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: gradle makePluginsJson
 
       - name: Copy artifacts to builds
@@ -53,10 +49,9 @@ jobs:
           find src -name "plugins.json" -exec cp {} builds/ \;
 
       - name: Patch plugins.json URL and bump version
-  env:
-    NEW_VERSION: 2
-  run: python3 .github/scripts/patch_plugins.py
- 
+        env:
+          NEW_VERSION: 2
+        run: python3 .github/scripts/patch_plugins.py
 
       - name: Push to builds branch
         working-directory: builds
