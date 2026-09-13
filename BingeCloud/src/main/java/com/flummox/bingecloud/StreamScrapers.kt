@@ -292,17 +292,15 @@ suspend fun resolveWrapper(url: String): String? {
     if (url.contains("hdstream4u.com")) return null
 
     // Fetch wrapper, look for hubcloud / vcloud anchor
-    return try {
-        val doc = app.get(url).document
-        doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
-        doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
-        null
-    } catch (e: Exception) {
-        Log.e("BingeCloud", "resolveWrapper failed for $url: ${e.message}")
-        null
-    }
+    val doc = cloudflareGetDoc(url)
+    if (doc == null) {
+    Log.e("BingeCloud", "resolveWrapper: fetch failed for $url")
+    return null
 }
-
+doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
+doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
+return null
+}
 // ─────────────────────────────────────────
 // Main entry — parallel across sources
 // ─────────────────────────────────────────
