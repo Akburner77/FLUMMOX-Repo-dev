@@ -1,8 +1,8 @@
 # 🎬 FLUMMOX Repo
 
-A CloudStream 3 plugin repository hosting extensions for streaming Movies, TV Series & Anime.
+A CloudStream plugin repository hosting extensions for streaming Movies, TV Series & Anime.
 
-**Shortcode:** `flummoxrepo`
+**Shortcode:** `flummoxrepo` not active yet
 
 ---
 
@@ -10,7 +10,7 @@ A CloudStream 3 plugin repository hosting extensions for streaming Movies, TV Se
 
 ### Add the Repository
 
-1. Open CloudStream 3
+1. Open CloudStream
 2. Go to **Settings → Extensions → Add Repository**
 3. Paste this URL:
 https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds/repo.json
