@@ -19,6 +19,7 @@
 package com.flummox.bingecloud
 
 import android.content.Context
+import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
@@ -31,5 +32,13 @@ class BingeCloudPlugin : Plugin() {
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
         registerExtractorAPI(Filepress())
+
+        this.openSettings = { ctx: Context ->
+            Settings.showSettingsDialog(ctx) {
+                try {
+                    MainActivity.reloadHomeEvent.invoke(true)
+                } catch (_: Exception) {}
+            }
+        }
     }
 }
