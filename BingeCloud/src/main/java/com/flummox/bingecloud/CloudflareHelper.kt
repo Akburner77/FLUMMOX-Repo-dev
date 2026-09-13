@@ -1,19 +1,14 @@
 package com.flummox.bingecloud
 
 import android.content.Context
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
+import android.webkit.CookieManager
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.utils.WebViewResolver
+import com.lagradost.cloudstream3.network.WebViewResolver
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import java.net.URI
 
-/**
- * Holds the Android Context passed to BingeCloudPlugin.load().
- * Needed to invoke WebViewResolver for Cloudflare challenges.
- */
 object BingeCloudCtx {
     var context: Context? = null
 }
@@ -38,34 +33,32 @@ private fun isChallenge(html: String): Boolean {
     return CF_INDICATORS.any { lower.contains(it) }
 }
 
-/**
- * Cloudflare-aware GET. Returns response body as String, or null on failure.
- * 1. Plain HTTP request first (fast path).
- * 2. If the response looks like a CF challenge, open a WebView to solve it,
- *    harvest cookies, and retry.
- */
 suspend fun cloudflareGet(url: String, referer: String? = null): String? {
-    // Fast path — plain request
+    // Fast path — plain HTTP GET first
     try {
-        val res = app.get(url, referer = referer, headers = mapOf("User-Agent" to CF_UA))
+        val res = app.get(
+            url,
+            referer = referer,
+            headers = mapOf("User-Agent" to CF_UA)
+        )
         if (res.code in 200..299) {
             val text = res.text
             if (!isChallenge(text)) return text
             Log.d("BingeCloud", "CF challenge detected on $url — switching to WebView")
         } else {
-            Log.d("BingeCloud", "plain GET returned ${res.code} for $url")
+            Log.d("BingeCloud", "GET $url returned ${res.code}")
         }
     } catch (e: Exception) {
         Log.w("BingeCloud", "plain GET threw for $url: ${e.message}")
     }
 
-    // Slow path — WebView
-    val ctx = BingeCloudCtx.context ?: run {
-        Log.e("BingeCloud", "no Context available for WebView bypass")
+    // Slow path — WebView resolver
+    val cookies = resolveWithWebView(url)
+    if (cookies.isNullOrBlank()) {
+        Log.e("BingeCloud", "WebView resolution returned no cookies for $url")
         return null
     }
 
-    val cookies = resolveWithWebView(ctx, url) ?: return null
     return try {
         val res = app.get(
             url,
@@ -80,38 +73,44 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
     }
 }
 
-/**
- * Convenience wrapper that parses the response as a Jsoup Document.
- */
 suspend fun cloudflareGetDoc(url: String, referer: String? = null): Document? {
     val html = cloudflareGet(url, referer) ?: return null
     return Jsoup.parse(html, url)
 }
 
-private suspend fun resolveWithWebView(context: Context, url: String): String? {
+private suspend fun resolveWithWebView(url: String): String? {
     return try {
-        val resolver = WebViewResolver(
-            url = url,
-            userAgent = CF_UA,
-            timeout = 20L,
-            additionalUrls = listOf(
-                "challenges.cloudflare.com",
-                "cdn-cgi/challenge-platform",
-                "turnstile"
-            ),
-            interceptor = object : WebViewResolver.Interceptor {
-                override fun shouldInterceptRequest(
-                    view: WebView,
-                    request: WebResourceRequest
-                ): WebResourceResponse? = null
+        val host = try {
+            URI(url).host ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+        val interceptRegex = if (host.isNotEmpty())
+            Regex(".*${Regex.escape(host)}.*")
+        else
+            Regex(".*")
 
-                override fun onPageFinished(view: WebView, url: String) {
-                    Log.d("BingeCloud", "WebView page finished: $url")
-                }
-            }
+        val resolver = WebViewResolver(
+            interceptUrl = interceptRegex,
+            additionalUrls = listOf(
+                Regex(".*challenges\\.cloudflare\\.com.*"),
+                Regex(".*cdn-cgi/challenge-platform.*")
+            ),
+            userAgent = CF_UA,
+            useOkhttp = false,
+            timeout = 20_000L
         )
-        val cookies = resolver.resolveUsingWebView(context)
-        Log.d("BingeCloud", "WebView cookies len=${cookies?.length ?: 0}")
+
+        val (finalRequest, additional) = resolver.resolveUsingWebView(url)
+        var cookies = finalRequest?.header("Cookie")
+            ?: additional.firstOrNull()?.header("Cookie")
+
+        // Fallback — read directly from WebView CookieManager
+        if (cookies.isNullOrBlank()) {
+            cookies = CookieManager.getInstance().getCookie(url)
+        }
+
+        Log.d("BingeCloud", "WebView resolved — cookie len=${cookies?.length ?: 0}")
         cookies
     } catch (e: Exception) {
         Log.e("BingeCloud", "WebViewResolver failed: ${e.message}")
