@@ -138,25 +138,26 @@ open class VCloud : ExtractorApi() {
         if (!link.startsWith("https://")) link = baseUrl + link
 
         val document = app.get(link).document
-        val header = document.select("div.card-header").text()
-        val size = document.select("i#size").text()
-        val quality = getIndexQuality(header)
+val header = document.select("div.card-header").text()
+val size = document.select("i#size").text().trim().trim('[', ']')
+val quality = getIndexQuality(header)
 
-        suspend fun myCallback(link: String, server: String = "") {
-    val headerClean = header.trim()
-    val sizeClean = size.trim().trim('[', ']')
-    val serverClean = server.trim('[', ']')
+// Extract just "1080p", "720p", "480p" from header
+val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p"
+
+suspend fun myCallback(link: String, server: String = "") {
+    val serverClean = server.trim('[', ']').trim()
     val label = buildString {
-        if (headerClean.isNotBlank()) append(headerClean)
-        if (sizeClean.isNotBlank()) {
-            if (isNotEmpty()) append(" · ")
-            append(sizeClean)
+        append(qualityText)
+        if (size.isNotBlank()) {
+            append(" · ")
+            append(size)
         }
         if (serverClean.isNotBlank()) {
-            if (isNotEmpty()) append(" · ")
+            append(" · ")
             append(serverClean)
         }
-    }.ifBlank { "Stream" }
+    }
 
     callback.invoke(
         newExtractorLink(
@@ -168,7 +169,7 @@ open class VCloud : ExtractorApi() {
             this.quality = quality
         }
     )
-        }
+}
 
         document.select("h2 a.btn").amap {
             val href = it.attr("href")
