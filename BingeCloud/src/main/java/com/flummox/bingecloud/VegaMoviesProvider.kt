@@ -68,7 +68,7 @@ data class MirrorLink(
 
 open class VegaMoviesProvider : MainAPI() {
     override var mainUrl = "https://vegamovies.mq"
-    override var name = "BingeCloud-DEV"
+    override var name = "BingeCloud"
     override val hasMainPage = true
     override var lang = "en"
     override val hasDownloadSupport = true
