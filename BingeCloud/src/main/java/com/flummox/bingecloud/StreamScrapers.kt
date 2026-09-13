@@ -456,6 +456,7 @@ private suspend fun resolveHdhub4uLink(url: String): Pair<String, String>? {
 // ═══════════════════════════════════════════
 //  Entry
 // ═══════════════════════════════════════════
+
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     val results = mutableListOf<ScrapedMirror>()
 
@@ -483,6 +484,19 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         }
     } catch (e: Exception) {
         Log.e("BingeCloud", "MD scrape failed: ${e.message}")
+    }
+
+    try {
+        val hdPage = hdhub4uFindPage(q.title, q.year, q.type)
+        if (hdPage != null) {
+            val hdLinks = if (q.type == "series")
+                hdhub4uExtractSeries(hdPage, q.season, q.episode)
+            else
+                hdhub4uExtractMovie(hdPage)
+            results.addAll(hdLinks)
+        }
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "HDH scrape failed: ${e.message}")
     }
 
     Log.d("BingeCloud", "Scraped ${results.size} mirrors for ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
