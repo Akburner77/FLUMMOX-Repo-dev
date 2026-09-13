@@ -290,18 +290,7 @@ if (imdbId.isNotEmpty()) {
                         if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
                     }
-                    text.contains("g-direct") || text.contains("gdirect") -> {
-                        if (mirrors.none { it.url == href })
-                            mirrors.add(MirrorLink(quality, size, "G-Direct", href))
-                    }
-                    text.contains("filepress") -> {
-                        if (mirrors.none { it.url == href })
-                            mirrors.add(MirrorLink(quality, size, "Filepress", href))
-                    }
-                    text.contains("gdflix") -> {
-                        if (mirrors.none { it.url == href })
-                            mirrors.add(MirrorLink(quality, size, "GDFlix", href))
-                    }
+                      
                     text.contains("download now") && href.startsWith("http") -> {
                         if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "Direct", href))
