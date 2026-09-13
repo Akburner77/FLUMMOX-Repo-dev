@@ -2,30 +2,26 @@ package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.app
 import com.lagradost.api.Log
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import org.json.JSONObject
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
-// ── Data passed from load() to loadLinks() ──
 data class StreamQuery(
     val title: String,
     val year: String,
-    val type: String,          // "movie" or "series"
+    val type: String,
     val imdbId: String = "",
     val season: Int = 0,
     val episode: Int = 0
 )
 
 data class ScrapedMirror(
-    val quality: String,       // "1080p" etc
-    val mirror: String,        // "V-Cloud" / "HubCloud" / "G-Direct"
+    val quality: String,
+    val mirror: String,
     val url: String,
-    val source: String         // "VM" or "MD"
+    val source: String
 )
 
-// ── Domain resolution (shared) ──
 private suspend fun resolveDomain(key: String, fallback: String): String {
     return try {
         val json = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json").text
@@ -36,7 +32,6 @@ private suspend fun resolveDomain(key: String, fallback: String): String {
     }
 }
 
-// ── Title normalizer for matching ──
 private fun normalize(s: String): String {
     return s.lowercase()
         .replace(Regex("""[^a-z0-9]+"""), " ")
@@ -47,7 +42,6 @@ private fun titleMatches(a: String, b: String): Boolean {
     val na = normalize(a)
     val nb = normalize(b)
     if (na.isEmpty() || nb.isEmpty()) return false
-    // Full containment OR high token overlap
     if (na.contains(nb) || nb.contains(na)) return true
     val ta = na.split(" ").toSet()
     val tb = nb.split(" ").toSet()
@@ -55,9 +49,9 @@ private fun titleMatches(a: String, b: String): Boolean {
     return common.size >= 2 && common.size.toFloat() / maxOf(ta.size, tb.size) >= 0.6f
 }
 
-// ═══════════════════════════════════════════════════════
-//  VegaMovies scraper
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  VegaMovies
+// ═══════════════════════════════════════════
 private suspend fun vegamoviesFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("vegamovies", "https://vegamovies.mq")
     return try {
@@ -104,7 +98,7 @@ private suspend fun vegamoviesExtractMovie(pageUrl: String): List<ScrapedMirror>
             val dl = links.firstOrNull { it.text().contains("Download", true) }
                 ?: links.firstOrNull { it.text().contains("V-Cloud", true) }
                 ?: continue
-            val inner = followAndFindMirrors(dl.attr("href"))
+            val inner = followAndFindMirrors(dl.attr("href"), "VM")
             inner.forEach { out.add(it.copy(quality = qText)) }
         }
     } catch (e: Exception) {
@@ -117,7 +111,6 @@ private suspend fun vegamoviesExtractSeries(pageUrl: String, season: Int, episod
     val out = mutableListOf<ScrapedMirror>()
     try {
         val doc = app.get(pageUrl).document
-        // Find season header matching our target season
         val headers = doc.select("h3, h4, h5").filter {
             val txt = it.text()
             Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE).containsMatchIn(txt) &&
@@ -132,8 +125,7 @@ private suspend fun vegamoviesExtractSeries(pageUrl: String, season: Int, episod
         val nextEl = targetHeader.nextElementSibling()
         val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else targetHeader.select("a")
         val dl = links.firstOrNull { it.text().contains("Download", true) } ?: return out
-        // VegaMovies bundles whole seasons — the download link leads to a page with all episode mirrors
-        val inner = followAndFindMirrors(dl.attr("href"))
+        val inner = followAndFindMirrors(dl.attr("href"), "VM")
         inner.forEach { out.add(it.copy(quality = qText)) }
     } catch (e: Exception) {
         Log.e("BingeCloud", "VM series extract failed: ${e.message}")
@@ -141,8 +133,7 @@ private suspend fun vegamoviesExtractSeries(pageUrl: String, season: Int, episod
     return out
 }
 
-// Given a download button URL, follow it and extract mirror links
-private suspend fun followAndFindMirrors(downloadUrl: String): List<ScrapedMirror> {
+private suspend fun followAndFindMirrors(downloadUrl: String, sourceTag: String): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     try {
         val doc = app.get(downloadUrl).document
@@ -159,8 +150,10 @@ private suspend fun followAndFindMirrors(downloadUrl: String): List<ScrapedMirro
             if (href.isEmpty() || href.startsWith("#")) continue
             val text = elem.text().lowercase()
             when {
-                text.contains("v-cloud") || text.contains("vcloud") -> out.add(ScrapedMirror("", "V-Cloud", href, "VM"))
-                text.contains("hubcloud") -> out.add(ScrapedMirror("", "HubCloud", href, "VM"))
+                text.contains("v-cloud") || text.contains("vcloud") ->
+                    out.add(ScrapedMirror("", "V-Cloud", href, sourceTag))
+                text.contains("hubcloud") ->
+                    out.add(ScrapedMirror("", "HubCloud", href, sourceTag))
             }
         }
     } catch (e: Exception) {
@@ -169,9 +162,9 @@ private suspend fun followAndFindMirrors(downloadUrl: String): List<ScrapedMirro
     return out
 }
 
-// ═══════════════════════════════════════════════════════
-//  MoviesDrive scraper
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  MoviesDrive
+// ═══════════════════════════════════════════
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
     return try {
@@ -207,24 +200,50 @@ private suspend fun moviesdriveExtractMovie(pageUrl: String): List<ScrapedMirror
     val out = mutableListOf<ScrapedMirror>()
     try {
         val doc = app.get(pageUrl).document
-        // Quality headers: <h5>...1080p...</h5> followed by <a href="mdrive.lol/archive/NNNN/">
         val headers = doc.select("h5").filter {
             val txt = it.text()
             txt.contains(Regex("""\d{3,4}[pP]""")) && !txt.contains("Zip", true)
         }
+
+        val pairs = mutableListOf<Pair<String, String>>()
         for (h in headers) {
             val qText = Regex("""(\d{3,4}[pP])""").find(h.text())?.value ?: continue
-            val next = h.nextElementSibling()
-            val archiveUrl = when {
-                next != null && next.tagName() == "a" -> next.attr("href")
-                next != null && next.tagName() == "h5" -> next.selectFirst("a")?.attr("href") ?: ""
-                else -> h.selectFirst("a")?.attr("href") ?: ""
+            var cursor = h.nextElementSibling()
+            var steps = 0
+            var archiveUrl: String? = null
+            while (cursor != null && steps < 4) {
+                val link = cursor.selectFirst("a[href*='archive']")
+                    ?: cursor.selectFirst("a[href*='mdrive']")
+                if (link != null && link.attr("href").isNotEmpty()) {
+                    archiveUrl = link.attr("href")
+                    break
+                }
+                if (cursor.tagName() == "h5" &&
+                    Regex("""\d{3,4}[pP]""").containsMatchIn(cursor.text())) break
+                cursor = cursor.nextElementSibling()
+                steps++
             }
-            if (archiveUrl.isEmpty()) continue
-            // Load archive page and get all hubcloud links
-            val archive = app.get(archiveUrl).document
-            archive.select("a[href*='hubcloud']").forEach { a ->
-                out.add(ScrapedMirror(qText, "HubCloud", a.attr("href"), "MD"))
+            if (!archiveUrl.isNullOrEmpty()) pairs.add(qText to archiveUrl)
+        }
+
+        Log.d("BingeCloud", "MD movie: ${pairs.size} archives to fetch")
+
+        pairs.amap { (quality, archiveUrl) ->
+            try {
+                val archive = app.get(archiveUrl).document
+                val hubs = archive.select("a[href*='hubcloud'], a[href*='gdflix'], a[href*='gdirect']")
+                hubs.forEach { a ->
+                    val href = a.attr("href")
+                    val label = when {
+                        href.contains("hubcloud", true) -> "HubCloud"
+                        href.contains("gdflix", true) -> "GDFlix"
+                        href.contains("gdirect", true) -> "G-Direct"
+                        else -> "Direct"
+                    }
+                    out.add(ScrapedMirror(quality, label, href, "MD"))
+                }
+            } catch (e: Exception) {
+                Log.e("BingeCloud", "MD archive failed: ${e.message}")
             }
         }
     } catch (e: Exception) {
@@ -237,63 +256,68 @@ private suspend fun moviesdriveExtractSeries(pageUrl: String, season: Int, episo
     val out = mutableListOf<ScrapedMirror>()
     try {
         val doc = app.get(pageUrl).document
-        // Season headers: <h5><strong><span>Season N</span> ... <span>1080p...</span></strong></h5>
-        // Followed by <h5><a href="mdrive.lol/archive/NNNN/">1080p Single Episode</a></h5>
-        val seasonHeaders = doc.select("h5").filter {
-            val txt = it.text()
-            Regex("""Season\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(txt) &&
-                Regex("""\d{3,4}[pP]""").containsMatchIn(txt)
+        val allH5 = doc.select("h5")
+
+        val pairs = mutableListOf<Pair<String, String>>()
+        for (i in allH5.indices) {
+            val h = allH5[i]
+            val txt = h.text()
+            val sMatch = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(txt) ?: continue
+            val s = sMatch.groupValues[1].toIntOrNull() ?: continue
+            if (s != season) continue
+            val qText = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
+
+            var j = i + 1
+            while (j < allH5.size && j < i + 4) {
+                val next = allH5[j]
+                val nextTxt = next.text()
+                if (Regex("""Season\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(nextTxt) &&
+                    nextTxt.contains(Regex("""\d{3,4}[pP]"""))) break
+                if (nextTxt.contains("Single Episode", true)) {
+                    val href = next.selectFirst("a")?.attr("href") ?: ""
+                    if (href.isNotEmpty()) pairs.add(qText to href)
+                    break
+                }
+                j++
+            }
         }
 
-        for (sh in seasonHeaders) {
-            val hTxt = sh.text()
-            val s = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE)
-                .find(hTxt)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
-            if (s != season) continue
-            val qText = Regex("""(\d{3,4}[pP])""").find(hTxt)?.value ?: "Unknown"
+        Log.d("BingeCloud", "MD series S${season}E${episode}: ${pairs.size} archives")
 
-            // Walk forward for the matching archive link
-            var cursor: Element? = sh.nextElementSibling()
-            var archiveUrl: String? = null
-            var hops = 0
-            while (cursor != null && hops < 6) {
-                val txt = cursor.text()
-                if (txt.contains("Single Episode", true)) {
-                    archiveUrl = cursor.selectFirst("a")?.attr("href")
-                    if (!archiveUrl.isNullOrEmpty()) break
+        pairs.amap { (quality, archiveUrl) ->
+            try {
+                val archive = app.get(archiveUrl).document
+                val epHeaders = archive.select("h5").filter {
+                    Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE).containsMatchIn(it.text())
                 }
-                // Stop if we hit the next season header
-                if (Regex("""Season\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(txt) &&
-                    cursor !== sh) break
-                cursor = cursor.nextElementSibling()
-                hops++
-            }
-            if (archiveUrl.isNullOrEmpty()) continue
-
-            // Archive page: <h5>Ep## – ...</h5> + <a href="hubcloud.ist/drive/XXXX">HubCloud</a>
-            val archive = app.get(archiveUrl).document
-            val epHeaders = archive.select("h5").filter {
-                Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE).containsMatchIn(it.text())
-            }
-            for (eph in epHeaders) {
-                val epNum = Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE)
-                    .find(eph.text())?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
-                if (epNum != episode) continue
-                // Find hubcloud link after this header
-                var next = eph.nextElementSibling()
-                var step = 0
-                while (next != null && step < 3) {
-                    val link = next.selectFirst("a[href*='hubcloud']")
-                    if (link != null) {
-                        out.add(ScrapedMirror(qText, "HubCloud", link.attr("href"), "MD"))
-                        break
+                for (eph in epHeaders) {
+                    val epNum = Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE)
+                        .find(eph.text())?.groupValues?.get(1)?.toIntOrNull() ?: continue
+                    if (epNum != episode) continue
+                    var next = eph.nextElementSibling()
+                    var step = 0
+                    while (next != null && step < 3) {
+                        val link = next.selectFirst("a[href*='hubcloud'], a[href*='gdflix'], a[href*='gdirect']")
+                        if (link != null) {
+                            val href = link.attr("href")
+                            val label = when {
+                                href.contains("hubcloud", true) -> "HubCloud"
+                                href.contains("gdflix", true) -> "GDFlix"
+                                href.contains("gdirect", true) -> "G-Direct"
+                                else -> "Direct"
+                            }
+                            out.add(ScrapedMirror(quality, label, href, "MD"))
+                            break
+                        }
+                        if (next.tagName() == "h5" &&
+                            Regex("""Ep\s*0*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(next.text())) break
+                        next = next.nextElementSibling()
+                        step++
                     }
-                    if (next.tagName() == "h5" &&
-                        Regex("""Ep\s*0*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(next.text())) break
-                    next = next.nextElementSibling()
-                    step++
+                    break
                 }
-                break
+            } catch (e: Exception) {
+                Log.e("BingeCloud", "MD archive failed: ${e.message}")
             }
         }
     } catch (e: Exception) {
@@ -302,13 +326,12 @@ private suspend fun moviesdriveExtractSeries(pageUrl: String, season: Int, episo
     return out
 }
 
-// ═══════════════════════════════════════════════════════
-//  Public entry
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  Entry
+// ═══════════════════════════════════════════
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     val results = mutableListOf<ScrapedMirror>()
 
-    // VegaMovies
     try {
         val vmPage = vegamoviesFindPage(q.title, q.year, q.type)
         if (vmPage != null) {
@@ -322,7 +345,6 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         Log.e("BingeCloud", "VM scrape failed: ${e.message}")
     }
 
-    // MoviesDrive
     try {
         val mdPage = moviesdriveFindPage(q.title, q.year, q.type)
         if (mdPage != null) {
