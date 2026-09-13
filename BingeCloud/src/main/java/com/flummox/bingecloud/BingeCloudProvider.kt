@@ -4,6 +4,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.api.Log
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONObject
 import java.util.Calendar
 
@@ -166,17 +169,21 @@ open class BingeCloudProvider : MainAPI() {
         val sorted = mirrors.sortedByDescending { qualityRank(it.quality) }
         Log.d("BingeCloud", "loadLinks: ${sorted.size} mirrors after sort")
 
-        sorted.amap { m ->
-            try {
-                when {
-                    m.url.contains("vcloud", true) || m.url.contains("hubcloud", true) ->
-                        VCloud(m.source).getUrl(m.url, "", subtitleCallback, callback)
-                    else ->
-                        loadExtractor(m.url, "", subtitleCallback, callback)
+        coroutineScope {
+            sorted.map { m ->
+                async {
+                    try {
+                        when {
+                            m.url.contains("vcloud", true) || m.url.contains("hubcloud", true) ->
+                                VCloud(m.source).getUrl(m.url, "", subtitleCallback, callback)
+                            else ->
+                                loadExtractor(m.url, "", subtitleCallback, callback)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
-            }
+            }.awaitAll()
         }
         return true
     }
