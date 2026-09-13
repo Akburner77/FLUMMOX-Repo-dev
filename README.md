@@ -21,7 +21,9 @@ https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds/repo.json
 
 ## 🧩 Extensions
 
-**BingeCloud** | Movies, TV Series, Anime | ✅ Working |
+| Extension | Content | Status |
+|-----------|---------|--------|
+| **BingeCloud** | Movies, TV Series, Anime | ✅ Working |
 
 *More extensions coming soon.*
 
