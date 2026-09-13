@@ -34,7 +34,27 @@ private fun isChallenge(html: String): Boolean {
 }
 
 suspend fun cloudflareGet(url: String, referer: String? = null): String? {
-    // Fast path — plain HTTP GET first
+    // Try stored per-domain cookies first
+    val domain = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
+    val storedCookie = if (domain.isNotEmpty()) Settings.getCookieForDomain(domain) else null
+    if (!storedCookie.isNullOrBlank()) {
+        try {
+            val res = app.get(
+                url,
+                referer = referer,
+                headers = mapOf("User-Agent" to CF_UA, "Cookie" to storedCookie)
+            )
+            if (res.code in 200..299) {
+                val text = res.text
+                if (!isChallenge(text)) {
+                    Log.d("BingeCloud", "stored cookie worked for $domain")
+                    return text
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Fast path — plain HTTP GET
     try {
         val res = app.get(
             url,
@@ -44,7 +64,7 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         if (res.code in 200..299) {
             val text = res.text
             if (!isChallenge(text)) return text
-            Log.d("BingeCloud", "CF challenge detected on $url — switching to WebView")
+            Log.d("BingeCloud", "CF challenge on $url — auto-resolving")
         } else {
             Log.d("BingeCloud", "GET $url returned ${res.code}")
         }
@@ -52,26 +72,23 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         Log.w("BingeCloud", "plain GET threw for $url: ${e.message}")
     }
 
-    // Slow path — WebView resolver
+    // Auto WebView
     val cookies = resolveWithWebView(url)
     if (cookies.isNullOrBlank()) {
-        Log.e("BingeCloud", "WebView resolution returned no cookies for $url")
+        Log.e("BingeCloud", "WebView returned no cookies for $url")
         return null
     }
- return try {
-    val res = app.get(
-        url,
-        referer = referer,
-        headers = mapOf(
-            "User-Agent" to CF_UA,
-            "Cookie" to cookies
+    return try {
+        val res = app.get(
+            url,
+            referer = referer,
+            headers = mapOf("User-Agent" to CF_UA, "Cookie" to cookies)
         )
-    )
-        res.text 
-} catch (e: Exception) {
-    Log.e("BingeCloud", "post-WebView GET failed for $url: ${e.message}")
-    null
-   }
+        res.text
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "post-WebView GET failed for $url: ${e.message}")
+        null
+    }
 }
 
 suspend fun cloudflareGetDoc(url: String, referer: String? = null): Document? {
