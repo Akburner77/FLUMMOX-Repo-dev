@@ -108,7 +108,7 @@ open class MoviesDriveProvider : MainAPI() {
                 title.contains("series", true)
 
         var description = ""
-        var cast: List<ActorData> = emptyList()
+        var cast: List<Actor> = emptyList()
         var genre: List<String> = emptyList()
         var imdbRating = ""
         var year = ""
@@ -137,7 +137,7 @@ open class MoviesDriveProvider : MainAPI() {
 
     private suspend fun loadMovie(
         document: org.jsoup.nodes.Document, title: String, url: String,
-        posterUrl: String, description: String, cast: List<ActorData>,
+        posterUrl: String, description: String, cast: List<Actor>,
         genre: List<String>, imdbRating: String, year: String,
         background: String, imdbUrl: String
     ): LoadResponse? {
@@ -165,7 +165,7 @@ open class MoviesDriveProvider : MainAPI() {
 
     private suspend fun loadSeries(
         document: org.jsoup.nodes.Document, title: String, url: String,
-        posterUrl: String, description: String, cast: List<ActorData>,
+        posterUrl: String, description: String, cast: List<Actor>,
         genre: List<String>, imdbRating: String, year: String,
         background: String, imdbUrl: String
     ): LoadResponse? {
