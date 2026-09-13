@@ -125,16 +125,31 @@ open class VCloud : ExtractorApi() {
         val quality = getIndexQuality(header)
 
         suspend fun myCallback(link: String, server: String = "") {
-            callback.invoke(
-                newExtractorLink(
-                    "${name}${server}",
-                    "${name}${server} ${header}[${size}]",
-                    link,
-                    ExtractorLinkType.VIDEO
-                ) {
-                    this.quality = quality
-                }
-            )
+    val headerClean = header.trim()
+    val sizeClean = size.trim().trim('[', ']')
+    val serverClean = server.trim('[', ']')
+    val label = buildString {
+        if (headerClean.isNotBlank()) append(headerClean)
+        if (sizeClean.isNotBlank()) {
+            if (isNotEmpty()) append(" · ")
+            append(sizeClean)
+        }
+        if (serverClean.isNotBlank()) {
+            if (isNotEmpty()) append(" · ")
+            append(serverClean)
+        }
+    }.ifBlank { "Stream" }
+
+    callback.invoke(
+        newExtractorLink(
+            source = name,
+            name = label,
+            url = link,
+            type = ExtractorLinkType.VIDEO
+        ) {
+            this.quality = quality
+        }
+    )
         }
 
         document.select("h2 a.btn").amap {
