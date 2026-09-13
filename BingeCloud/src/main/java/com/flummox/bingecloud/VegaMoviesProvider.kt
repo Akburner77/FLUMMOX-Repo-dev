@@ -357,7 +357,7 @@ if (imdbId.isNotEmpty()) {
     mirrors.amap { mirror ->
         try {
             when (mirror.mirror) {
-                "V-Cloud" -> VCloud().getUrl(mirror.url, "", subtitleCallback, callback)
+                "V-Cloud" -> VCloud("VM").getUrl(mirror.url, "", subtitleCallback, callback)
                 "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
                 "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
                 else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
