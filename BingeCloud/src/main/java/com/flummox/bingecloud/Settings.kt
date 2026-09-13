@@ -29,7 +29,15 @@ import android.widget.TextView
 import android.widget.Toast
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
-import kotlin.random.Random
+
+data class RowSpec(
+    val key: String,
+    val type: String,
+    val catalogId: String,
+    val name: String,
+    val defaultGenre: String? = null,
+    val sourceLabel: String
+)
 
 object Settings {
 
@@ -44,6 +52,7 @@ object Settings {
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
+    const val K_ROW_ORDER = "bingecloud_row_order"
     const val K_ROW_TRENDING_MOVIES = "bingecloud_row_trending_movies"
     const val K_ROW_TRENDING_SERIES = "bingecloud_row_trending_series"
     const val K_ROW_POPULAR_MOVIES = "bingecloud_row_popular_movies"
@@ -69,6 +78,47 @@ object Settings {
     const val K_ROW_ANIME_SCHEDULE = "bingecloud_row_anime_schedule"
 
     val DEFAULT_CF_DOMAINS = emptyList<String>()
+
+    val ALL_ROWS: List<RowSpec> = listOf(
+        RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", null, "TMDB"),
+        RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", null, "TMDB"),
+        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.top", "Popular Movies", null, "TMDB"),
+        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.top", "Popular Series", null, "TMDB"),
+        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "hi", "TMDB • Hindi"),
+        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "hi", "TMDB • Hindi"),
+        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "Action", "TVDB"),
+        RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
+        RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
+        RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
+        RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "Monday", "MAL"),
+        RowSpec(K_ROW_TOP_ANIME_MOVIES, "anime", "mal.top_movies", "Top Anime Movies", null, "MAL"),
+        RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
+        RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
+        RowSpec(K_ROW_MOST_FAV_ANIME, "anime", "mal.most_favorites", "Most Favorited Anime", null, "MAL"),
+        RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best of 2020s", "Action", "MAL"),
+        RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best of 2010s", "Action", "MAL"),
+        RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best of 2000s", "Action", "MAL"),
+        RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best of 90s", "Action", "MAL"),
+        RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best of 80s", "Action", "MAL"),
+    )
+
+    fun getRowOrder(): List<String> {
+        val stored = getKey<String>(K_ROW_ORDER) ?: ""
+        val parts = stored.split("|").map { it.trim() }.filter { it.isNotBlank() }
+        if (parts.isEmpty()) return ALL_ROWS.map { it.key }
+        val seen = parts.toSet()
+        val extras = ALL_ROWS.map { it.key }.filter { it !in seen }
+        return parts + extras
+    }
+
+    fun setRowOrder(order: List<String>) {
+        setKey(K_ROW_ORDER, order.joinToString("|"))
+    }
+
+    fun getRowSpecByKey(key: String): RowSpec? = ALL_ROWS.firstOrNull { it.key == key }
 
     // ── Getters ──
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 15).coerceIn(1, 50)
@@ -115,6 +165,7 @@ object Settings {
     private const val SUBTEXT = 0xFF8296AD.toInt()
     private const val GREEN = 0xFF4ADE80.toInt()
     private const val RED = 0xFFF87171.toInt()
+    private const val DISABLED = 0xFF3A4555.toInt()
 
     private fun dp(ctx: Context, v: Int): Int =
         (v * ctx.resources.displayMetrics.density).toInt()
@@ -155,81 +206,74 @@ object Settings {
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    // ── Shooting stars canvas ──
+    private fun arrowButtonBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
+        setColor(ROW)
+        cornerRadius = dp(ctx, 8).toFloat()
+        setStroke(dp(ctx, 1), CARD_BORDER)
+    }
+
+    // ── Shooting stars ──
     private class ShootingStarsView(context: Context) : View(context) {
         private data class Star(
             var x: Float, var y: Float, var vx: Float, var vy: Float,
-            var length: Float, var alpha: Float, var thickness: Float,
-            var phase: Float
+            var length: Float, var alpha: Float, var thickness: Float
         )
-
         private val stars = mutableListOf<Star>()
-        private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            strokeCap = Paint.Cap.ROUND
-        }
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
         private val rnd = java.util.Random()
         private var lastNs = 0L
 
-        init {
-            setWillNotDraw(false)
-        }
+        init { setWillNotDraw(false) }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val now = System.nanoTime()
-            val dt = if (lastNs == 0L) 0f else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
+            val dt = if (lastNs == 0L) 0f
+                else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
             lastNs = now
 
-            // Spawn
             if (rnd.nextFloat() < 0.03f && stars.size < 6) {
                 val startX = width + 60f + rnd.nextFloat() * 200f
                 val startY = -40f + rnd.nextFloat() * (height * 0.7f)
                 val speed = 280f + rnd.nextFloat() * 260f
                 stars.add(Star(
-                    x = startX, y = startY,
-                    vx = -speed * 0.9f,
-                    vy = speed * 0.55f,
-                    length = 70f + rnd.nextFloat() * 90f,
-                    alpha = 0.55f + rnd.nextFloat() * 0.45f,
-                    thickness = 1.2f + rnd.nextFloat() * 1.6f,
-                    phase = 0f
+                    startX, startY,
+                    -speed * 0.9f, speed * 0.55f,
+                    70f + rnd.nextFloat() * 90f,
+                    0.55f + rnd.nextFloat() * 0.45f,
+                    1.2f + rnd.nextFloat() * 1.6f
                 ))
             }
 
             val iter = stars.iterator()
             while (iter.hasNext()) {
                 val s = iter.next()
-                s.x += s.vx * dt
-                s.y += s.vy * dt
-                s.phase += dt * 3f
+                s.x += s.vx * dt; s.y += s.vy * dt
                 if (s.x < -250f || s.y > height + 80f) { iter.remove(); continue }
 
                 val lenScale = (s.x / width.toFloat()).coerceIn(0f, 1f)
                 val fade = 1f - (1f - lenScale) * 0.6f
                 val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
 
-                // Trail
                 val tx = s.x - s.vx / 280f * s.length
                 val ty = s.y - s.vy / 280f * s.length
-                trailPaint.color = Color.argb(a / 3, 140, 200, 255)
-                trailPaint.strokeWidth = s.thickness * 2.2f
-                canvas.drawLine(s.x, s.y, tx, ty, trailPaint)
 
-                trailPaint.color = Color.argb(a, 200, 235, 255)
-                trailPaint.strokeWidth = s.thickness
-                canvas.drawLine(s.x, s.y, tx, ty, trailPaint)
+                paint.color = Color.argb(a / 3, 140, 200, 255)
+                paint.strokeWidth = s.thickness * 2.2f
+                canvas.drawLine(s.x, s.y, tx, ty, paint)
 
-                // Head glow
-                trailPaint.color = Color.argb((a * 0.9f).toInt(), 255, 255, 255)
-                trailPaint.strokeWidth = s.thickness * 1.8f
-                canvas.drawPoint(s.x, s.y, trailPaint)
+                paint.color = Color.argb(a, 200, 235, 255)
+                paint.strokeWidth = s.thickness
+                canvas.drawLine(s.x, s.y, tx, ty, paint)
+
+                paint.color = Color.argb((a * 0.9f).toInt(), 255, 255, 255)
+                paint.strokeWidth = s.thickness * 1.8f
+                canvas.drawPoint(s.x, s.y, paint)
             }
-
             postInvalidateOnAnimation()
         }
     }
 
-    // ── Card ──
     private class Card(
         val root: LinearLayout,
         val body: LinearLayout,
@@ -300,7 +344,6 @@ object Settings {
         return Card(root, bodyLayout, status, chev)
     }
 
-    // ── Row builders ──
     private fun toggleRow(
         ctx: Context, label: String, desc: String?, initial: Boolean,
         onChange: (Boolean) -> Unit
@@ -368,7 +411,7 @@ object Settings {
         }
         fun mkBtn(sym: String, delta: Int) = Button(ctx).apply {
             text = sym; textSize = 18f; setTextColor(TEXT)
-            background = bg(INPUT, 20, ctx)
+            background = bg(INPUT, 20, ctx); isAllCaps = false
             minWidth = dp(ctx, 40); minHeight = dp(ctx, 40)
             setOnClickListener {
                 current = (current + delta).coerceIn(min, max)
@@ -413,7 +456,7 @@ object Settings {
             setTextColor(if (buttonColor == RED) RED else ACCENT_STRONG)
             background = if (buttonColor == RED) bg(0x22F87171, 18, ctx) else accentPill(ctx)
             setPadding(dp(ctx, 16), dp(ctx, 6), dp(ctx, 16), dp(ctx, 6))
-            minHeight = 0; minWidth = 0
+            minHeight = 0; minWidth = 0; isAllCaps = false
             setOnClickListener { onClick() }
         })
         return row
@@ -448,16 +491,15 @@ object Settings {
         row.addView(Button(ctx).apply {
             text = if (hasCookie) "Reopen" else "Open"
             textSize = 12f; setTextColor(ACCENT_STRONG)
-            background = accentPill(ctx)
+            background = accentPill(ctx); isAllCaps = false
             setPadding(dp(ctx, 14), dp(ctx, 6), dp(ctx, 14), dp(ctx, 6))
             minHeight = 0; minWidth = 0
             setOnClickListener { onOpen() }
         })
         if (hasCookie) {
             row.addView(Button(ctx).apply {
-                text = "✕"
-                textSize = 12f; setTextColor(RED)
-                background = bg(0x22F87171, 18, ctx)
+                text = "✕"; textSize = 12f; setTextColor(RED)
+                background = bg(0x22F87171, 18, ctx); isAllCaps = false
                 setPadding(dp(ctx, 10), dp(ctx, 6), dp(ctx, 10), dp(ctx, 6))
                 minHeight = 0; minWidth = 0
                 setOnClickListener { onClear() }
@@ -481,20 +523,76 @@ object Settings {
             }
         }
 
+    // ── Homepage reorder row ──
+    private fun makeArrowBtn(
+        ctx: Context, symbol: String, enabled: Boolean,
+        onClick: () -> Unit
+    ): TextView = TextView(ctx).apply {
+        text = symbol
+        textSize = 14f
+        setTextColor(if (enabled) ACCENT_STRONG else DISABLED)
+        background = arrowButtonBg(ctx)
+        gravity = Gravity.CENTER
+        val size = dp(ctx, 34)
+        layoutParams = LinearLayout.LayoutParams(size, size)
+            .apply { leftMargin = dp(ctx, 4) }
+        isClickable = enabled
+        if (enabled) setOnClickListener { onClick() }
+    }
+
+    private fun rowReorderItem(
+        ctx: Context, spec: RowSpec, position: Int, total: Int,
+        onMoveUp: () -> Unit, onMoveDown: () -> Unit
+    ): LinearLayout {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = bg(ROW, 10, ctx)
+            setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 12), dp(ctx, 10))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(ctx, 6) }
+        }
+        // Position number
+        row.addView(TextView(ctx).apply {
+            text = "${position + 1}"
+            setTextColor(SUBTEXT); textSize = 12f
+            gravity = Gravity.CENTER
+            val s = dp(ctx, 26)
+            layoutParams = LinearLayout.LayoutParams(s, s)
+            background = bg(INPUT, 12, ctx)
+        })
+        // Label
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { leftMargin = dp(ctx, 10) }
+        }
+        col.addView(TextView(ctx).apply {
+            text = spec.name; setTextColor(TEXT); textSize = 13f
+        })
+        col.addView(TextView(ctx).apply {
+            text = spec.sourceLabel; setTextColor(SUBTEXT); textSize = 10f
+            setPadding(0, dp(ctx, 2), 0, 0)
+        })
+        row.addView(col)
+
+        // Arrows
+        row.addView(makeArrowBtn(ctx, "▲", position > 0) { onMoveUp() })
+        row.addView(makeArrowBtn(ctx, "▼", position < total - 1) { onMoveDown() })
+        return row
+    }
+
     // ── Main dialog ──
     fun showSettingsDialog(ctx: Context, onSaved: () -> Unit) {
         lateinit var dialog: AlertDialog
-        val refresh: () -> Unit = {
-            dialog.dismiss()
-            showSettingsDialog(ctx, onSaved)
-        }
 
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             background = bg(BG, 0, ctx)
         }
 
-        // ── Sky header with shooting stars ──
+        // Sky header
         run {
             val headerFrame = FrameLayout(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -503,15 +601,13 @@ object Settings {
                 background = skyGradient(ctx)
                 clipChildren = true
             }
-            val starsView = ShootingStarsView(ctx).apply {
+            headerFrame.addView(ShootingStarsView(ctx).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-            }
-            headerFrame.addView(starsView)
-
-            val headerContent = LinearLayout(ctx).apply {
+            })
+            val content = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.BOTTOM
                 setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 22))
@@ -520,16 +616,16 @@ object Settings {
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             }
-            headerContent.addView(TextView(ctx).apply {
+            content.addView(TextView(ctx).apply {
                 text = "☁  BingeCloud"
                 setTextColor(TEXT); textSize = 26f
             })
-            headerContent.addView(TextView(ctx).apply {
+            content.addView(TextView(ctx).apply {
                 text = "Configure sources, catalogs & cookies"
                 setTextColor(ACCENT); textSize = 12f
                 setPadding(0, dp(ctx, 6), 0, 0)
             })
-            headerFrame.addView(headerContent)
+            headerFrame.addView(content)
             root.addView(headerFrame)
         }
 
@@ -540,7 +636,7 @@ object Settings {
         }
         scroll.addView(body)
 
-        // ── 1. Performance ──
+        // 1. Performance
         run {
             val c = buildCard(ctx, "⚡", "Performance", "Control scraping speed")
             c.body.addView(stepperRow(
@@ -550,7 +646,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── 2. Cloudflare ──
+        // 2. Cloudflare
         run {
             val saved = getCfDomains()
             val c = buildCard(
@@ -576,8 +672,10 @@ object Settings {
                         ctx, domain, has,
                         onOpen = { openCfWebView(ctx, "https://$domain", domain) },
                         onClear = {
-                            clearCookieForDomain(domain); refresh()
+                            clearCookieForDomain(domain)
                             Toast.makeText(ctx, "Cleared $domain", Toast.LENGTH_SHORT).show()
+                            dialog.dismiss()
+                            showSettingsDialog(ctx, onSaved)
                         }
                     ))
                 }
@@ -590,7 +688,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── 3. FebBox ──
+        // 3. FebBox
         run {
             val has = getFebBoxToken().isNotBlank()
             val c = buildCard(
@@ -609,20 +707,28 @@ object Settings {
             c.body.addView(actionRow(
                 ctx, "Sign in / Refresh", "Opens febbox.com login",
                 if (has) "Re-login" else "Sign in"
-            ) { openFebBoxLogin(ctx, onSaved = { onSaved(); refresh() }) })
+            ) {
+                openFebBoxLogin(ctx) {
+                    onSaved()
+                    dialog.dismiss()
+                    showSettingsDialog(ctx, onSaved)
+                }
+            })
             if (has) {
                 c.body.addView(actionRow(
                     ctx, "Sign out", "Removes saved session",
                     "Sign out", buttonColor = RED
                 ) {
-                    clearFebBoxToken(); refresh()
+                    clearFebBoxToken()
                     Toast.makeText(ctx, "Signed out", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                    showSettingsDialog(ctx, onSaved)
                 })
             }
             body.addView(c.root)
         }
 
-        // ── 4. Sources ──
+        // 4. Sources
         run {
             val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcFebBox()).count { it }
             val c = buildCard(
@@ -636,7 +742,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── 5. Quality ──
+        // 5. Quality
         run {
             val cur = getQualityPref()
             val c = buildCard(ctx, "🎞️", "Preferred Quality", "Current: $cur")
@@ -644,8 +750,7 @@ object Settings {
             val display = options.map { it.substringBefore(" (").trim() }
             val spinner = Spinner(ctx).apply {
                 adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, options)
-                val idx = display.indexOf(cur).coerceAtLeast(0)
-                setSelection(idx)
+                setSelection(display.indexOf(cur).coerceAtLeast(0))
                 background = bg(ROW, 10, ctx)
                 setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
                 layoutParams = LinearLayout.LayoutParams(
@@ -662,7 +767,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── 6. Pre-filter ──
+        // 6. Pre-filter
         run {
             val c = buildCard(ctx, "🧪", "Link Validation", "Pre-filter dead links")
             c.body.addView(toggleRow(
@@ -673,45 +778,61 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── 7. Homepage ──
+        // 7. Homepage — reorderable
         run {
-            val rowsSpec = listOf(
-                Triple("Trending Movies", K_ROW_TRENDING_MOVIES, "TMDB"),
-                Triple("Trending Series", K_ROW_TRENDING_SERIES, "TMDB"),
-                Triple("Popular Movies", K_ROW_POPULAR_MOVIES, "TMDB"),
-                Triple("Popular Series", K_ROW_POPULAR_SERIES, "TMDB"),
-                Triple("Hindi Movies", K_ROW_HINDI_MOVIES, "TMDB • Hindi"),
-                Triple("Hindi Series", K_ROW_HINDI_SERIES, "TMDB • Hindi"),
-                Triple("TVDB Trending Movies", K_ROW_TVDB_MOVIES, "TVDB"),
-                Triple("TVDB Trending Series", K_ROW_TVDB_SERIES, "TVDB"),
-                Triple("TVDB Genres Movies", K_ROW_TVDB_GENRES_MOVIES, "TVDB"),
-                Triple("TVDB Genres Series", K_ROW_TVDB_GENRES_SERIES, "TVDB"),
-                Triple("Top Anime", K_ROW_TOP_ANIME, "MAL"),
-                Triple("Airing Now", K_ROW_AIRING_ANIME, "MAL"),
-                Triple("Upcoming Anime", K_ROW_UPCOMING_ANIME, "MAL"),
-                Triple("Airing Schedule", K_ROW_ANIME_SCHEDULE, "MAL"),
-                Triple("Top Anime Movies", K_ROW_TOP_ANIME_MOVIES, "MAL"),
-                Triple("Top Anime Series", K_ROW_TOP_ANIME_SERIES, "MAL"),
-                Triple("Most Popular Anime", K_ROW_MOST_POPULAR_ANIME, "MAL"),
-                Triple("Most Favorited Anime", K_ROW_MOST_FAV_ANIME, "MAL"),
-                Triple("Best of 2020s", K_ROW_BEST_2020S, "MAL"),
-                Triple("Best of 2010s", K_ROW_BEST_2010S, "MAL"),
-                Triple("Best of 2000s", K_ROW_BEST_2000S, "MAL"),
-                Triple("Best of 90s", K_ROW_BEST_90S, "MAL"),
-                Triple("Best of 80s", K_ROW_BEST_80S, "MAL"),
-            )
-            val on = rowsSpec.count { isRowEnabled(it.second) }
             val c = buildCard(
-                ctx, "🏠", "Homepage", "$on of ${rowsSpec.size} sections",
-                badge = "$on/${rowsSpec.size}"
+                ctx, "🏠", "Homepage", "Tap ▲▼ to reorder sections"
             )
-            for ((label, key, source) in rowsSpec) {
-                c.body.addView(toggleRow(ctx, label, source, isRowEnabled(key)) { setKey(key, it) })
+
+            val listHolder = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
             }
+
+            fun renderList() {
+                listHolder.removeAllViews()
+                val order = getRowOrder()
+                val total = order.size
+                val on = order.count { isRowEnabled(it) }
+
+                c.statusBadge.text = "$on/$total"
+                c.statusBadge.visibility = View.VISIBLE
+
+                for ((idx, key) in order.withIndex()) {
+                    val spec = getRowSpecByKey(key) ?: continue
+                    listHolder.addView(rowReorderItem(
+                        ctx, spec, idx, total,
+                        onMoveUp = {
+                            val current = getRowOrder().toMutableList()
+                            val i = current.indexOf(key)
+                            if (i > 0) {
+                                current[i] = current[i - 1]
+                                current[i - 1] = key
+                                setRowOrder(current)
+                                renderList()
+                            }
+                        },
+                        onMoveDown = {
+                            val current = getRowOrder().toMutableList()
+                            val i = current.indexOf(key)
+                            if (i >= 0 && i < current.size - 1) {
+                                current[i] = current[i + 1]
+                                current[i + 1] = key
+                                setRowOrder(current)
+                                renderList()
+                            }
+                        }
+                    ))
+                }
+            }
+
+            renderList()
+            c.body.addView(labelBlock(ctx, "Section order",
+                "Position 1 shows first on the home screen."))
+            c.body.addView(listHolder)
             body.addView(c.root)
         }
 
-        // ── Footer ──
+        // Footer
         run {
             val footer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
@@ -737,39 +858,28 @@ object Settings {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
-        // ── Custom button bar ──
+        // Buttons
         run {
             val bar = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 background = bg(BG, 0, ctx)
                 setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 12), dp(ctx, 16))
             }
-
-            val cancel = Button(ctx).apply {
-                text = "Cancel"
-                textSize = 14f
-                setTextColor(SUBTEXT)
-                background = cancelButtonBg(ctx)
-                isAllCaps = false
+            bar.addView(Button(ctx).apply {
+                text = "Cancel"; textSize = 14f; setTextColor(SUBTEXT)
+                background = cancelButtonBg(ctx); isAllCaps = false
                 layoutParams = LinearLayout.LayoutParams(0, dp(ctx, 50), 1f)
                     .apply { rightMargin = dp(ctx, 6) }
                 setOnClickListener { dialog.dismiss() }
-            }
-            val save = Button(ctx).apply {
-                text = "Save & Close"
-                textSize = 14f
+            })
+            bar.addView(Button(ctx).apply {
+                text = "Save & Close"; textSize = 14f
                 setTextColor(0xFF0A0D14.toInt())
-                background = saveButtonBg(ctx)
-                isAllCaps = false
+                background = saveButtonBg(ctx); isAllCaps = false
                 layoutParams = LinearLayout.LayoutParams(0, dp(ctx, 50), 1.4f)
                     .apply { leftMargin = dp(ctx, 6) }
-                setOnClickListener {
-                    dialog.dismiss()
-                    onSaved()
-                }
-            }
-            bar.addView(cancel)
-            bar.addView(save)
+                setOnClickListener { dialog.dismiss(); onSaved() }
+            })
             root.addView(bar)
         }
 
@@ -840,7 +950,8 @@ object Settings {
             setOnClickListener { dlg.dismiss() }
         })
         bar.addView(Button(ctx).apply {
-            text = "🍪  Save Cookies"; textSize = 13f; setTextColor(0xFF0A0D14.toInt())
+            text = "🍪  Save Cookies"; textSize = 13f
+            setTextColor(0xFF0A0D14.toInt())
             background = saveButtonBg(ctx); isAllCaps = false
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
                 .apply { leftMargin = dp(ctx, 8) }
@@ -923,7 +1034,8 @@ object Settings {
             setOnClickListener { dlg.dismiss() }
         })
         bar.addView(Button(ctx).apply {
-            text = "🔑  Save Token"; textSize = 13f; setTextColor(0xFF0A0D14.toInt())
+            text = "🔑  Save Token"; textSize = 13f
+            setTextColor(0xFF0A0D14.toInt())
             background = saveButtonBg(ctx); isAllCaps = false
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
                 .apply { leftMargin = dp(ctx, 8) }
