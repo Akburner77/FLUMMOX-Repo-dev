@@ -84,9 +84,6 @@ suspend fun resolveFinalUrl(startUrl: String): String? {
     return currentUrl
 }
 
-// ─────────────────────────────────────────────────────────
-// V-CLOUD EXTRACTOR
-// ─────────────────────────────────────────────────────────
 open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
     override val name: String = "V-Cloud"
     override val mainUrl: String = "https://vcloud.*"
@@ -138,36 +135,38 @@ open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
         if (!link.startsWith("https://")) link = baseUrl + link
 
         val document = app.get(link).document
-val header = document.select("div.card-header").text()
-val quality = getIndexQuality(header)
-val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p"
+        val header = document.select("div.card-header").text()
+        val quality = getIndexQuality(header)
+        val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p"
 
-suspend fun myCallback(link: String, server: String = "") {
-    val serverClean = server.trim('[', ']').trim()
-        .replace(Regex("""\s*\d{3,4}[pP]\s*$"""), "").trim()
-    val label = buildString {
-        append(qualityText)
-        if (sourceTag.isNotBlank()) {
-            append(" · ")
-            append(sourceTag)
-        }
-        if (serverClean.isNotBlank()) {
-            append(" · ")
-            append(serverClean)
-        }
-    }
+        suspend fun myCallback(link: String, server: String = "") {
+            val serverClean = server.trim('[', ']').trim()
+                .replace(Regex("""\b\d{3,4}[pP]\b"""), "")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            val label = buildString {
+                append(qualityText)
+                if (sourceTag.isNotBlank()) {
+                    append(" · ")
+                    append(sourceTag)
+                }
+                if (serverClean.isNotBlank()) {
+                    append(" · ")
+                    append(serverClean)
+                }
+            }
 
-    callback.invoke(
-        newExtractorLink(
-            source = name,
-            name = label,
-            url = link,
-            type = ExtractorLinkType.VIDEO
-        ) {
-            this.quality = quality
+            callback.invoke(
+                newExtractorLink(
+                    source = name,
+                    name = label,
+                    url = link,
+                    type = ExtractorLinkType.VIDEO
+                ) {
+                    this.quality = quality
+                }
+            )
         }
-    )
-}
 
         document.select("h2 a.btn").amap {
             val href = it.attr("href")
@@ -205,13 +204,9 @@ suspend fun myCallback(link: String, server: String = "") {
     }
 }
 
-
-// ─────────────────────────────────────────────────────────
-// G-DIRECT EXTRACTOR (Google Drive)
-// ─────────────────────────────────────────────────────────
 open class GDirect : ExtractorApi() {
-    override val name: String = "G-Direct"
-    override val mainUrl: String = "https://gdirect.*"
+    override val name = "G-Direct"
+    override val mainUrl = "https://gdirect.*"
     override val requiresReferer = false
 
     private fun extractDriveId(url: String): String? {
@@ -233,7 +228,6 @@ open class GDirect : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("BingeCloud", "G-Direct: $url")
         val finalUrl = resolveFinalUrl(url) ?: url
         val driveId = extractDriveId(finalUrl) ?: extractDriveId(url)
         if (driveId == null) {
@@ -255,12 +249,9 @@ open class GDirect : ExtractorApi() {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// FILEPRESS / GDFLIX EXTRACTOR
-// ─────────────────────────────────────────────────────────
 open class Filepress : ExtractorApi() {
-    override val name: String = "Filepress"
-    override val mainUrl: String = "https://filepress.*"
+    override val name = "Filepress"
+    override val mainUrl = "https://filepress.*"
     override val requiresReferer = false
 
     override suspend fun getUrl(
@@ -269,16 +260,13 @@ open class Filepress : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d("BingeCloud", "Filepress: $url")
         try {
             val doc = app.get(url).document
-
             val rows = doc.select("tr, .file-row, .list-group-item")
             for (row in rows) {
                 val anchor = row.selectFirst("a[href]") ?: continue
                 val href = anchor.attr("href")
                 val text = anchor.text().lowercase()
-
                 if (href.startsWith("http") && (text.contains("download") || text.contains("gdflix"))) {
                     if (href.contains("gdflix", true) && href != url) {
                         getUrl(href, url, subtitleCallback, callback)
@@ -297,7 +285,6 @@ open class Filepress : ExtractorApi() {
                     }
                 }
             }
-
             val directLinks = doc.select("a[href*='drive.google.com'], a[href*='.mkv'], a[href*='.mp4']")
             for (a in directLinks) {
                 val href = a.attr("href")
