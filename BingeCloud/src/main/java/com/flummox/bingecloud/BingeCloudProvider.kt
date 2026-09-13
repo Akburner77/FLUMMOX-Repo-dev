@@ -23,36 +23,53 @@ open class BingeCloudProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
-    private val allRows = listOf(
-    Triple(Triple("movie", "tmdb.trending", "Trending Movies"), Settings.K_ROW_TRENDING_MOVIES, 0),
-    Triple(Triple("series", "tmdb.trending", "Trending Series"), Settings.K_ROW_TRENDING_SERIES, 0),
-    Triple(Triple("movie", "tmdb.top", "Popular Movies"), Settings.K_ROW_POPULAR_MOVIES, 0),
-    Triple(Triple("series", "tmdb.top", "Popular Series"), Settings.K_ROW_POPULAR_SERIES, 0),
-    Triple(Triple("anime", "mal.top_anime", "Top Anime"), Settings.K_ROW_TOP_ANIME, 0),
-    Triple(Triple("anime", "mal.airing", "Airing Now"), Settings.K_ROW_AIRING_ANIME, 0),
-    Triple(Triple("anime", "mal.top_movies", "Top Anime Movies"), Settings.K_ROW_TOP_ANIME_MOVIES, 0),
-    Triple(Triple("anime", "mal.most_popular", "Most Popular Anime"), Settings.K_ROW_MOST_POPULAR_ANIME, 0)
+    private data class RowSpec(
+    val type: String,
+    val catalogId: String,
+    val name: String,
+    val settingsKey: String,
+    val defaultGenre: String? = null
 )
 
-    override val mainPage = mainPageOf(
+private val allRows = listOf(
+    RowSpec("movie", "tmdb.trending", "Trending Movies", Settings.K_ROW_TRENDING_MOVIES),
+    RowSpec("series", "tmdb.trending", "Trending Series", Settings.K_ROW_TRENDING_SERIES),
+    RowSpec("movie", "tmdb.top", "Popular Movies", Settings.K_ROW_POPULAR_MOVIES),
+    RowSpec("series", "tmdb.top", "Popular Series", Settings.K_ROW_POPULAR_SERIES),
+    RowSpec("movie", "tvdb.trending", "TVDB Trending Movies", Settings.K_ROW_TVDB_MOVIES, "Action"),
+    RowSpec("series", "tvdb.trending", "TVDB Trending Series", Settings.K_ROW_TVDB_SERIES, "Action"),
+    RowSpec("anime", "mal.top_anime", "Top Anime", Settings.K_ROW_TOP_ANIME),
+    RowSpec("anime", "mal.airing", "Airing Now", Settings.K_ROW_AIRING_ANIME),
+    RowSpec("anime", "mal.upcoming", "Upcoming Anime", Settings.K_ROW_UPCOMING_ANIME),
+    RowSpec("anime", "mal.top_movies", "Top Anime Movies", Settings.K_ROW_TOP_ANIME_MOVIES),
+    RowSpec("anime", "mal.top_series", "Top Anime Series", Settings.K_ROW_TOP_ANIME_SERIES),
+    RowSpec("anime", "mal.most_popular", "Most Popular Anime", Settings.K_ROW_MOST_POPULAR_ANIME),
+    RowSpec("anime", "mal.most_favorites", "Most Favorited Anime", Settings.K_ROW_MOST_FAV_ANIME),
+    RowSpec("anime", "mal.20sDecade", "Best of 2020s", Settings.K_ROW_BEST_2020S, "Action"),
+)
+
+override val mainPage = mainPageOf(
     *allRows
-        .filter { (_, key, _) -> Settings.isRowEnabled(key) }
-        .map { (row, _, _) ->
-            val (type, id, name) = row
-            "$type$ROW_TAG$id$ROW_TAG$name" to name
+        .filter { Settings.isRowEnabled(it.settingsKey) }
+        .map { row ->
+            val id = if (row.defaultGenre != null)
+                "${row.catalogId}$ROW_TAG${row.defaultGenre}"
+            else row.catalogId
+            "${row.type}$ROW_TAG$id$ROW_TAG${row.name}" to row.name
         }
         .toTypedArray()
-    )
+)
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val parts = request.data.split(ROW_TAG)
-        if (parts.size < 2) return null
-        val type = parts[0]
-        val catalogId = parts[1]
-        val skip = (page - 1) * 25
-        val metas = aioFetchCatalog(type, catalogId, null, skip)
-        val items = metas.mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+    val parts = request.data.split(ROW_TAG)
+    if (parts.size < 2) return null
+    val type = parts[0]
+    val catalogId = parts[1]
+    val genre = parts.getOrNull(2)
+    val skip = (page - 1) * 25
+    val metas = aioFetchCatalog(type, catalogId, genre, skip)
+    val items = metas.mapNotNull { it.toSearchResponse() }
+    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
