@@ -28,6 +28,7 @@ import com.lagradost.api.Log
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 import java.net.URI
+import java.util.Calendar
 
 data class Meta(
     val id: String?, val imdb_id: String?, val type: String?,
@@ -68,9 +69,9 @@ data class MirrorLink(
 
 open class VegaMoviesProvider : MainAPI() {
     override var mainUrl = "https://vegamovies.mq"
-    override var name = "BingeCloud"
+    override var name = "VegaMovies"
     override val hasMainPage = true
-    override var lang = "en"
+    override var lang = "hi"
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
@@ -108,7 +109,7 @@ open class VegaMoviesProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.select("img").attr("alt").replace("Download ", "")
+        val title = cleanTitle(this.select("img").attr("alt"))
         val href = this.attr("href")
         var posterUrl = this.select("img").attr("src")
         if (!posterUrl.contains("https:")) posterUrl = this.select("img").attr("data-src")
@@ -124,7 +125,7 @@ open class VegaMoviesProvider : MainAPI() {
         return response.hits.map { hit ->
             val doc = hit.document
             newMovieSearchResponse(
-                doc.post_title.replace("Download ", ""),
+                cleanTitle(doc.post_title),
                 doc.permalink,
                 TvType.Movie
             ) { this.posterUrl = doc.post_thumbnail }
@@ -135,7 +136,7 @@ open class VegaMoviesProvider : MainAPI() {
         ensureDomain()
         val fullUrl = if (url.startsWith("http")) url else "$mainUrl$url"
         val document = app.get(fullUrl).document
-        var title = document.select("title").text().replace("Download ", "")
+        var title = cleanTitle(document.select("title").text())
         var posterUrl = document.select("p > img").attr("src")
         val imdbUrl = document.select("a[href*=\"imdb\"]").attr("href")
         val imdbId = imdbUrl.substringAfter("title/").substringBefore("/")
@@ -153,99 +154,105 @@ open class VegaMoviesProvider : MainAPI() {
         var imdbRating = ""
         var year = ""
         var background = posterUrl
-
         var responseData: ResponseData? = null
-if (imdbId.isNotEmpty()) {
-    val jsonResponse = app.get("$cinemetaUrl/${if (isSeries) "series" else "movie"}/$imdbId.json").text
-    responseData = tryParseJson<ResponseData>(jsonResponse)
-    if (responseData != null) {
-        description = responseData.meta.description ?: description
-        cast = responseData.meta.cast ?: emptyList()
-        title = responseData.meta.name ?: title
-        genre = responseData.meta.genre ?: emptyList()
-        imdbRating = responseData.meta.imdbRating ?: ""
-        year = responseData.meta.year ?: ""
-        posterUrl = responseData.meta.poster ?: posterUrl
-        background = responseData.meta.background ?: background
-    }
-}
+
+        if (imdbId.isNotEmpty()) {
+            val jsonResponse = app.get("$cinemetaUrl/${if (isSeries) "series" else "movie"}/$imdbId.json").text
+            responseData = tryParseJson<ResponseData>(jsonResponse)
+            if (responseData != null) {
+                description = responseData.meta.description ?: description
+                cast = responseData.meta.cast ?: emptyList()
+                title = responseData.meta.name ?: title
+                genre = responseData.meta.genre ?: emptyList()
+                imdbRating = responseData.meta.imdbRating ?: ""
+                year = responseData.meta.year ?: ""
+                posterUrl = responseData.meta.poster ?: posterUrl
+                background = responseData.meta.background ?: background
+            }
+        }
 
         return if (isSeries) {
-    // Build season → mirrors map from VegaMovies page
-    val seasonMirrorsMap: MutableMap<Int, MutableList<MirrorLink>> = mutableMapOf()
-    val seasonHeaders = document.select("h3, h4, h5").filter {
-        val t = it.text()
-        (t.contains(Regex("""(?:Season|S)\s*\d+""", RegexOption.IGNORE_CASE)) ||
-         t.contains("Complete", true)) && !t.contains("Zip", true)
-    }
-
-    for (header in seasonHeaders) {
-        val headerText = header.text()
-        val season = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
-            .find(headerText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
-        val quality = extractQualityFromHeader(headerText)
-        val size = extractSizeFromHeader(headerText)
-
-        val nextEl = header.nextElementSibling()
-        val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else header.select("a")
-        val dl = links.firstOrNull {
-            it.text().contains("Download", true) || it.text().contains("V-Cloud", true)
-        } ?: continue
-
-        val mirrors = fetchMirrorsFromDownloadPage(dl.attr("href"), quality, size)
-        seasonMirrorsMap.getOrPut(season) { mutableListOf() }.addAll(mirrors)
-    }
-
-    // Use real episode list from Cinemeta if available
-    val episodeList = responseData?.meta?.videos ?: emptyList()
-    val episodes = mutableListOf<Episode>()
-
-    if (episodeList.isNotEmpty()) {
-        for (ep in episodeList) {
-            val seasonMirrors = seasonMirrorsMap[ep.season] ?: emptyList()
-            if (seasonMirrors.isEmpty()) continue
-            val tagged = seasonMirrors.map {
-                it.copy(season = ep.season, episode = ep.episode, showName = title)
+            val seasonMirrorsMap: MutableMap<Int, MutableList<MirrorLink>> = mutableMapOf()
+            val seasonHeaders = document.select("h3, h4, h5").filter {
+                val t = it.text()
+                (t.contains(Regex("""(?:Season|S)\s*\d+""", RegexOption.IGNORE_CASE)) ||
+                 t.contains("Complete", true)) && !t.contains("Zip", true)
             }
-            episodes.add(newEpisode(tagged) {
-                this.name = ep.name ?: ep.title ?: "Episode ${ep.episode}"
-                this.season = ep.season
-                this.episode = ep.episode
-                this.posterUrl = when {
-                    !ep.thumbnail.isNullOrBlank() -> ep.thumbnail
-                    !background.isNullOrBlank() -> background
-                    else -> posterUrl
+
+            for (header in seasonHeaders) {
+                val headerText = header.text()
+                val season = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
+                    .find(headerText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
+                val quality = extractQualityFromHeader(headerText)
+                val size = extractSizeFromHeader(headerText)
+
+                val nextEl = header.nextElementSibling()
+                val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else header.select("a")
+                val dl = links.firstOrNull {
+                    it.text().contains("Download", true) || it.text().contains("V-Cloud", true)
+                } ?: continue
+
+                val mirrors = fetchMirrorsFromDownloadPage(dl.attr("href"), quality, size)
+                seasonMirrorsMap.getOrPut(season) { mutableListOf() }.addAll(mirrors)
+            }
+
+            val episodeList = responseData?.meta?.videos ?: emptyList()
+            val episodes = mutableListOf<Episode>()
+
+            if (episodeList.isNotEmpty()) {
+                for (ep in episodeList) {
+                    val seasonMirrors = seasonMirrorsMap[ep.season] ?: emptyList()
+                    if (seasonMirrors.isEmpty()) continue
+                    val tagged = seasonMirrors.map {
+                        it.copy(season = ep.season, episode = ep.episode, showName = title)
+                    }
+                    episodes.add(newEpisode(tagged) {
+                        this.name = ep.name ?: ep.title ?: "Episode ${ep.episode}"
+                        this.season = ep.season
+                        this.episode = ep.episode
+                        this.posterUrl = when {
+                            !ep.thumbnail.isNullOrBlank() && ep.thumbnail != "null" -> ep.thumbnail
+                            background.isNotBlank() && background != "null" -> background
+                            else -> posterUrl
+                        }
+                        this.description = ep.overview
+                    })
                 }
-                this.description = ep.overview
-           })
-        }
-    } else {
-        for ((season, mirrors) in seasonMirrorsMap) {
-            episodes.add(newEpisode(mirrors) {
-                this.name = "Season $season (Complete)"
-                this.season = season
-                this.episode = 1
-            })
-        }
-    }
+            } else {
+                for ((season, mirrors) in seasonMirrorsMap) {
+                    val tagged = mirrors.map { it.copy(season = season, episode = 1, showName = title) }
+                    episodes.add(newEpisode(tagged) {
+                        this.name = "Season $season (Complete)"
+                        this.season = season
+                        this.episode = 1
+                        this.posterUrl = background
+                    })
+                }
+            }
 
-    val statusTag = when {
-    responseData?.meta?.status?.contains("Ended", true) == true -> "Completed"
-    responseData?.meta?.status?.contains("Returning", true) == true -> "Ongoing"
-    else -> ""
-}
-val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            val parsedYear = year.substringBefore("–").substringBefore("-").trim().toIntOrNull()
+                ?: year.take(4).toIntOrNull()
+            val statusTag = when {
+                responseData?.meta?.status?.contains("Ended", true) == true -> "Completed"
+                responseData?.meta?.status?.contains("Returning", true) == true -> "Ongoing"
+                responseData?.meta?.status?.contains("Canceled", true) == true -> "Completed"
+                parsedYear != null && parsedYear < currentYear - 1 -> "Completed"
+                parsedYear != null && parsedYear >= currentYear - 1 -> "Ongoing"
+                else -> ""
+            }
+            val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
 
-newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-        this.posterUrl = posterUrl
-        this.plot = description
-        this.tags = tagsWithStatus
-        this.score = Score.from10(imdbRating)
-        this.year = year.toIntOrNull()
-        this.backgroundPosterUrl = background
-        addActors(cast)
-      }
-      } else {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = posterUrl
+                this.plot = description
+                this.tags = tagsWithStatus
+                this.score = Score.from10(imdbRating)
+                this.year = year.toIntOrNull()
+                this.backgroundPosterUrl = background
+                addActors(cast)
+            }
+        } else {
             val allMirrors = mutableListOf<MirrorLink>()
 
             val qualityHeaders = document.select("h3, h4, h5, .entry-title, .quality-title").filter {
@@ -279,12 +286,21 @@ newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             allMirrors.clear()
             allMirrors.addAll(taggedAll)
 
-            Log.d("BingeCloud", "Total mirrors: ${allMirrors.size}")
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            val parsedYear = year.substringBefore("–").substringBefore("-").trim().toIntOrNull()
+                ?: year.take(4).toIntOrNull()
+            val statusTag = when {
+                responseData?.meta?.status?.contains("Released", true) == true -> "Completed"
+                responseData?.meta?.status?.contains("Returning", true) == true -> "Ongoing"
+                parsedYear != null && parsedYear < currentYear - 1 -> "Completed"
+                else -> ""
+            }
+            val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
 
             newMovieLoadResponse(title, url, TvType.Movie, allMirrors) {
                 this.posterUrl = posterUrl
                 this.plot = description
-                this.tags = genre
+                this.tags = tagsWithStatus
                 this.score = Score.from10(imdbRating)
                 this.year = year.toIntOrNull()
                 this.backgroundPosterUrl = background
@@ -293,9 +309,6 @@ newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // MIRROR DETECTION — scans <a>, <button>, [onclick], [data-href]
-    // ─────────────────────────────────────────────────────────
     private suspend fun fetchMirrorsFromDownloadPage(
         downloadUrl: String,
         quality: String,
@@ -304,14 +317,11 @@ newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
         val mirrors = mutableListOf<MirrorLink>()
         try {
             val doc = app.get(fixUrl(downloadUrl)).document
-
             val candidates = doc.select("a, button, [onclick], [data-href]")
 
             for (elem in candidates) {
                 var href = elem.attr("href").trim()
-                if (href.isEmpty() || href == "#") {
-                    href = elem.attr("data-href").trim()
-                }
+                if (href.isEmpty() || href == "#") href = elem.attr("data-href").trim()
                 if (href.isEmpty() || href == "#") {
                     val onclick = elem.attr("onclick")
                     if (onclick.isNotEmpty()) {
@@ -328,16 +338,20 @@ newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                         if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "V-Cloud", href))
                     }
-                      
+                    text.contains("g-direct") || text.contains("gdirect") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "G-Direct", href))
+                    }
+                    text.contains("filepress") -> {
+                        if (mirrors.none { it.url == href })
+                            mirrors.add(MirrorLink(quality, size, "Filepress", href))
+                    }
                     text.contains("download now") && href.startsWith("http") -> {
                         if (mirrors.none { it.url == href })
                             mirrors.add(MirrorLink(quality, size, "Direct", href))
                     }
                 }
             }
-
-            Log.d("BingeCloud", "Mirrors found on $downloadUrl: ${mirrors.size}")
-            mirrors.forEach { Log.d("BingeCloud", "  ${it.mirror} | ${it.quality} | ${it.size} | ${it.url}") }
         } catch (e: Exception) {
             Log.e("BingeCloud", "fetchMirrors error: ${e.message}")
         }
@@ -351,32 +365,67 @@ newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
         Regex("""\[([^\]]*(?:MB|GB)[^\]]*)\]""").find(header)?.groupValues?.getOrNull(1) ?: ""
 
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    val mirrors = try {
-        parseJson<List<MirrorLink>>(data)
-    } catch (e: Exception) {
-        Log.e("BingeCloud", "Failed to parse mirrors: ${e.message}")
-        return false
-    }
-
-    Log.d("BingeCloud", "loadLinks: ${mirrors.size} mirrors")
-
-    mirrors.amap { mirror ->
-        try {
-            when (mirror.mirror) {
-                "V-Cloud" -> VCloud("VM").getUrl(mirror.url, "", subtitleCallback, callback)
-                "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
-                "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
-                else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
-            }
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val mirrors = try {
+            parseJson<List<MirrorLink>>(data)
         } catch (e: Exception) {
-            Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
+            Log.e("BingeCloud", "Failed to parse mirrors: ${e.message}")
+            return false
         }
+
+        mirrors.amap { mirror ->
+            try {
+                when (mirror.mirror) {
+                    "V-Cloud" -> VCloud("VM").getUrl(mirror.url, "", subtitleCallback, callback)
+                    "G-Direct" -> GDirect().getUrl(mirror.url, "", subtitleCallback, callback)
+                    "Filepress", "GDFlix" -> Filepress().getUrl(mirror.url, "", subtitleCallback, callback)
+                    else -> loadExtractor(mirror.url, "", subtitleCallback, callback)
+                }
+            } catch (e: Exception) {
+                Log.e("BingeCloud", "${mirror.mirror} failed: ${e.message}")
+            }
+        }
+        return true
     }
-    return true
+}
+
+fun cleanTitle(raw: String): String {
+    var t = raw
+    t = t.replace(Regex("""\[[^\]]*]"""), "")
+    t = t.replace(Regex("""\{[^}]*}"""), "")
+    t = t.replace(Regex("""\((?:19|20)\d{2}\)"""), "")
+    val junkPatterns = listOf(
+        """(?i)\bdual\s*audio\b""",
+        """(?i)\bmulti\s*audio\b""",
+        """(?i)\bhindi\s*\+\s*english\b""",
+        """(?i)\bhindi[\s\-]?korean\b""",
+        """(?i)\badded\b""",
+        """(?i)\bweb[\s\-]?dl\b""",
+        """(?i)\bweb[\s\-]?rip\b""",
+        """(?i)\bblu[\s\-]?ray\b""",
+        """(?i)\bhdr[\s\-]?rip\b""",
+        """(?i)\bhdtv\b""",
+        """(?i)\bx264\b""",
+        """(?i)\bx265\b""",
+        """(?i)\bhevc\b""",
+        """(?i)\besubs?\b""",
+        """(?i)\bdownload\b""",
+        """(?i)\bamzn\b""",
+        """(?i)\bdd[p5][\.\d]*\b""",
+        """(?i)\b5\.1\b""",
+        """(?i)\b7\.1\b""",
+        """(?i)\b\d{3,4}[pP]\b""",
+        """(?i)\b(?:2160|1080|720|480|360)p?\b""",
+        """(?i)\b\d+(?:\.\d+)?\s*(?:MB|GB)\b"""
+    )
+    for (p in junkPatterns) {
+        t = t.replace(Regex(p), " ")
     }
+    t = t.replace(Regex("""\s+"""), " ").trim()
+    t = t.trim('-', '|', ':', '·', '.', ' ')
+    return t.ifBlank { raw }
 }
