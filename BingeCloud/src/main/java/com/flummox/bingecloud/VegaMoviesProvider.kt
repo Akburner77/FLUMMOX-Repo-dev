@@ -225,10 +225,17 @@ if (imdbId.isNotEmpty()) {
         }
     }
 
-    newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+    val statusTag = when {
+    responseData?.meta?.status?.contains("Ended", true) == true -> "Completed"
+    responseData?.meta?.status?.contains("Returning", true) == true -> "Ongoing"
+    else -> ""
+}
+val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+
+newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
         this.posterUrl = posterUrl
         this.plot = description
-        this.tags = genre
+        this.tags = tagsWithStatus
         this.score = Score.from10(imdbRating)
         this.year = year.toIntOrNull()
         this.backgroundPosterUrl = background
