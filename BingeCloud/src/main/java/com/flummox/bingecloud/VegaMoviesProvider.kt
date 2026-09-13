@@ -49,6 +49,20 @@ data class EpisodeDetails(
     val imdbSeason: Int?, val imdbEpisode: Int?
 )
 
+data class AiometaCast(
+    val name: String?, val character: String?, val photo: String?
+)
+
+data class AiometaMeta(
+    val id: String?, val imdb_id: String?, val type: String?,
+    val poster: String?, val background: String?,
+    val name: String?, val description: String?,
+    val genres: List<String>?, val imdbRating: String?,
+    val releaseInfo: String?, val status: String?,
+    val cast: List<AiometaCast>?, val videos: List<EpisodeDetails>?
+)
+
+data class AiometaResponse(val meta: AiometaMeta)
 data class ResponseData(val meta: Meta)
 data class VegaSearchResponse(val hits: List<VegaHit>)
 data class VegaHit(val document: VegaDocument)
@@ -75,7 +89,7 @@ open class VegaMoviesProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
-    private val cinemetaUrl = "https://v3-cinemeta.strem.io/meta"
+    private val aiometaBase = "https://aiometadata.elfhosted.com/stremio/9197a4a9-2f5b-4911-845e-8704c520bdf7/meta"
     private var domainResolved = false
 
     private suspend fun ensureDomain() {
@@ -147,27 +161,46 @@ open class VegaMoviesProvider : MainAPI() {
 
         var description = document
             .selectFirst("h3:has(span:matches((?i)SYNOPSIS/PLOT))")
-            ?.nextElementSibling()?.text()
+            ?.nextElementSibling()?.text() ?: ""
 
-        var cast: List<String> = emptyList()
+        var cast: List<Actor> = emptyList()
         var genre: List<String> = emptyList()
         var imdbRating = ""
         var year = ""
         var background = posterUrl
-        var responseData: ResponseData? = null
+        var aiometa: AiometaMeta? = null
 
         if (imdbId.isNotEmpty()) {
-            val jsonResponse = app.get("$cinemetaUrl/${if (isSeries) "series" else "movie"}/$imdbId.json").text
-            responseData = tryParseJson<ResponseData>(jsonResponse)
-            if (responseData != null) {
-                description = responseData.meta.description ?: description
-                cast = responseData.meta.cast ?: emptyList()
-                title = responseData.meta.name ?: title
-                genre = responseData.meta.genre ?: emptyList()
-                imdbRating = responseData.meta.imdbRating ?: ""
-                year = responseData.meta.year ?: ""
-                posterUrl = responseData.meta.poster ?: posterUrl
-                background = responseData.meta.background ?: background
+            try {
+                val metaUrl = "$aiometaBase/${if (isSeries) "series" else "movie"}/$imdbId.json"
+                val jsonResponse = app.get(metaUrl).text
+                val parsed = tryParseJson<AiometaResponse>(jsonResponse)
+                aiometa = parsed?.meta
+                if (aiometa != null) {
+                    description = aiometa.description ?: description
+                    title = aiometa.name ?: title
+                    genre = aiometa.genres ?: emptyList()
+                    imdbRating = aiometa.imdbRating ?: ""
+                    year = aiometa.releaseInfo?.take(4) ?: ""
+                    posterUrl = aiometa.poster ?: posterUrl
+                    background = aiometa.background ?: background
+
+                    val castList = mutableListOf<Actor>()
+                    aiometa.cast?.forEach { c ->
+                        if (!c.name.isNullOrBlank()) {
+                            castList.add(
+                                Actor(
+                                    name = c.name!!,
+                                    roleString = c.character,
+                                    image = c.photo
+                                )
+                            )
+                        }
+                    }
+                    cast = castList
+                }
+            } catch (e: Exception) {
+                Log.e("BingeCloud", "Aiometa fetch failed: ${e.message}")
             }
         }
 
@@ -196,7 +229,7 @@ open class VegaMoviesProvider : MainAPI() {
                 seasonMirrorsMap.getOrPut(season) { mutableListOf() }.addAll(mirrors)
             }
 
-            val episodeList = responseData?.meta?.videos ?: emptyList()
+            val episodeList = aiometa?.videos ?: emptyList()
             val episodes = mutableListOf<Episode>()
 
             if (episodeList.isNotEmpty()) {
@@ -230,27 +263,19 @@ open class VegaMoviesProvider : MainAPI() {
                 }
             }
 
-            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-            val parsedYear = year.substringBefore("–").substringBefore("-").trim().toIntOrNull()
-                ?: year.take(4).toIntOrNull()
-            val statusTag = when {
-                responseData?.meta?.status?.contains("Ended", true) == true -> "Completed"
-                responseData?.meta?.status?.contains("Returning", true) == true -> "Ongoing"
-                responseData?.meta?.status?.contains("Canceled", true) == true -> "Completed"
-                parsedYear != null && parsedYear < currentYear - 1 -> "Completed"
-                parsedYear != null && parsedYear >= currentYear - 1 -> "Ongoing"
-                else -> ""
-            }
-            val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+            val statusTag = buildStatusTag(aiometa?.status, year)
+            val plotWithStatus = if (statusTag.isNotBlank())
+                "<b>$statusTag</b><br><br>$description"
+            else description
 
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = posterUrl
-                this.plot = description
-                this.tags = tagsWithStatus
+                this.plot = plotWithStatus
+                this.tags = genre
                 this.score = Score.from10(imdbRating)
                 this.year = year.toIntOrNull()
                 this.backgroundPosterUrl = background
-                addActors(cast)
+                if (cast.isNotEmpty()) addActors(cast)
             }
         } else {
             val allMirrors = mutableListOf<MirrorLink>()
@@ -286,26 +311,34 @@ open class VegaMoviesProvider : MainAPI() {
             allMirrors.clear()
             allMirrors.addAll(taggedAll)
 
-            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-            val parsedYear = year.substringBefore("–").substringBefore("-").trim().toIntOrNull()
-                ?: year.take(4).toIntOrNull()
-            val statusTag = when {
-                responseData?.meta?.status?.contains("Released", true) == true -> "Completed"
-                responseData?.meta?.status?.contains("Returning", true) == true -> "Ongoing"
-                parsedYear != null && parsedYear < currentYear - 1 -> "Completed"
-                else -> ""
-            }
-            val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+            val statusTag = buildStatusTag(aiometa?.status, year)
+            val plotWithStatus = if (statusTag.isNotBlank())
+                "<b>$statusTag</b><br><br>$description"
+            else description
 
             newMovieLoadResponse(title, url, TvType.Movie, allMirrors) {
                 this.posterUrl = posterUrl
-                this.plot = description
-                this.tags = tagsWithStatus
+                this.plot = plotWithStatus
+                this.tags = genre
                 this.score = Score.from10(imdbRating)
                 this.year = year.toIntOrNull()
                 this.backgroundPosterUrl = background
-                addActors(cast)
+                if (cast.isNotEmpty()) addActors(cast)
             }
+        }
+    }
+
+    private fun buildStatusTag(status: String?, year: String): String {
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        val parsedYear = year.substringBefore("–").substringBefore("-").trim().toIntOrNull()
+            ?: year.take(4).toIntOrNull()
+        return when {
+            status?.contains("Ended", true) == true -> "Completed"
+            status?.contains("Returning", true) == true -> "Ongoing"
+            status?.contains("Canceled", true) == true -> "Completed"
+            parsedYear != null && parsedYear < currentYear - 1 -> "Completed"
+            parsedYear != null && parsedYear >= currentYear - 1 -> "Ongoing"
+            else -> ""
         }
     }
 
@@ -393,39 +426,90 @@ open class VegaMoviesProvider : MainAPI() {
     }
 }
 
+/**
+ * Aggressively strips junk from raw titles scraped from VegaMovies.
+ * Input:  "Avatar The Way of Water 2022 BluRay Hindi ORG DD 5.1 480p 720p 1080p 2160p 4K"
+ * Output: "Avatar The Way of Water"
+ */
 fun cleanTitle(raw: String): String {
     var t = raw
-    t = Regex("\\[.*?\\]").replace(t, "")
-    t = Regex("\\{.*?\\}").replace(t, "")
-    t = Regex("\\((?:19|20)\\d{2}\\)").replace(t, "")
-    val junkPatterns = listOf(
+
+    // Convert dotted filenames to spaced words
+    t = t.replace(".", " ")
+    t = t.replace("_", " ")
+
+    // Strip square-bracket tags:  [1080p] [2.2GB] [Hindi]
+    t = Regex("\\[[^\\]]*\\]").replace(t, " ")
+    // Strip curly-brace tags:  {Hindi-Korean} {Dual Audio}
+    t = Regex("\\{[^\\}]*\\}").replace(t, " ")
+    // Strip parenthesised years only:  (2022)
+    t = Regex("\\((?:19|20)\\d{2}\\)").replace(t, " ")
+
+    // Strip common junk words (case-insensitive, word-boundary)
+    val junk = listOf(
         "(?i)\\bdual\\s*audio\\b",
         "(?i)\\bmulti\\s*audio\\b",
-        "(?i)\\bhindi\\s*\\+\\s*english\\b",
-        "(?i)\\bhindi[\\s\\-]?korean\\b",
+        "(?i)\\bhindi\\b",
+        "(?i)\\bkorean\\b",
+        "(?i)\\benglish\\b",
+        "(?i)\\btamil\\b",
+        "(?i)\\btelugu\\b",
+        "(?i)\\bmalayalam\\b",
+        "(?i)\\bkannada\\b",
         "(?i)\\badded\\b",
         "(?i)\\bweb[\\s\\-]?dl\\b",
         "(?i)\\bweb[\\s\\-]?rip\\b",
         "(?i)\\bblu[\\s\\-]?ray\\b",
+        "(?i)\\bbr[\\s\\-]?rip\\b",
         "(?i)\\bhdr[\\s\\-]?rip\\b",
+        "(?i)\\bdvd[\\s\\-]?rip\\b",
         "(?i)\\bhdtv\\b",
+        "(?i)\\bdweb\\b",
+        "(?i)\\bpredvd\\b",
         "(?i)\\bx264\\b",
         "(?i)\\bx265\\b",
+        "(?i)\\bh264\\b",
+        "(?i)\\bh265\\b",
         "(?i)\\bhevc\\b",
-        "(?i)\\besubs?\\b",
-        "(?i)\\bdownload\\b",
-        "(?i)\\bamzn\\b",
-        "(?i)\\bdd[p5][\\.\\d]*\\b",
+        "(?i)\\bavc\\b",
+        "(?i)\\baac\\b",
+        "(?i)\\bddp\\b",
+        "(?i)\\bdd[p5]?[\\d\\s\\.]*\\b",
+        "(?i)\\bdts\\b",
         "(?i)\\b5\\.1\\b",
         "(?i)\\b7\\.1\\b",
+        "(?i)\\b2\\.0\\b",
+        "(?i)\\besubs?\\b",
+        "(?i)\\bsubs?\\b",
+        "(?i)\\bmkv\\b",
+        "(?i)\\bmp4\\b",
+        "(?i)\\bdownload\\b",
+        "(?i)\\borg\\b",
+        "(?i)\\bamzn\\b",
+        "(?i)\\bnf\\b",
+        "(?i)\\bimax\\b",
+        "(?i)\\bprime\\b",
+        "(?i)\\bhotstar\\b",
+        "(?i)\\bdsnp\\b",
+        "(?i)\\bcomplete\\b",
+        "(?i)\\bseason\\b",
+        "(?i)\\bfull\\s*movie\\b",
+        "(?i)\\bmovie\\b",
+        "(?i)\\bwatch\\s*online\\b",
+        "(?i)\\bfree\\b",
+        "(?i)\\bvegamovies\\b",
         "(?i)\\b\\d{3,4}[pP]\\b",
-        "(?i)\\b(?:2160|1080|720|480|360)p?\\b",
-        "(?i)\\b\\d+(?:\\.\\d+)?\\s*(?:MB|GB)\\b"
+        "(?i)\\b(?:2160|1080|720|480|360|240)p?\\b",
+        "(?i)\\b\\d+(?:\\.\\d+)?\\s*(?:MB|GB|KB)\\b",
+        "(?i)\\b\\d+\\s*channel\\b"
     )
-    for (p in junkPatterns) {
-        t = Regex(p).replace(t, " ")
-    }
+    for (p in junk) t = Regex(p).replace(t, " ")
+
+    // Collapse whitespace
     t = Regex("\\s+").replace(t, " ").trim()
-    t = t.trim('-', '|', ':', '·', '.', ' ')
+
+    // Trim leading/trailing separators
+    t = t.trim('-', '|', ':', '·', '.', '_', ' ')
+
     return t.ifBlank { raw }
 }
