@@ -1,3 +1,21 @@
+/*
+ * FLUMMOX Repo — CloudStream 3 Extension Repository
+ * Copyright (C) 2026 FlummoxGamer
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.*
@@ -9,6 +27,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbUrl
 import com.lagradost.api.Log
 import org.json.JSONObject
 import org.jsoup.nodes.Element
+import java.util.Calendar
 
 data class MdMeta(
     val id: String?, val imdb_id: String?, val type: String?,
@@ -72,7 +91,7 @@ open class MoviesDriveProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.select("p").text().replace("Download ", "")
+        val title = cleanTitle(this.select("p").text())
         if (title.isEmpty()) return null
         val href = this.attr("href")
         val poster = this.select("img").attr("src")
@@ -87,7 +106,7 @@ open class MoviesDriveProvider : MainAPI() {
         val response = tryParseJson<MdSearchResponse>(text) ?: return null
         return response.hits.map { hit ->
             newMovieSearchResponse(
-                hit.document.postTitle.replace("Download ", ""),
+                cleanTitle(hit.document.postTitle),
                 "$mainUrl${hit.document.permalink}",
                 TvType.Movie
             ) { this.posterUrl = hit.document.postThumbnail }
@@ -97,7 +116,7 @@ open class MoviesDriveProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         ensureDomain()
         val document = app.get(url).document
-        var title = document.select("title").text().replace("Download ", "")
+        var title = cleanTitle(document.select("title").text())
         var posterUrl = document.select("main > p > img").attr("src")
         val imdbUrl = document.select("a[href*=\"imdb\"]").attr("href")
         val imdbId = imdbUrl.substringAfter("title/").substringBefore("/")
@@ -128,13 +147,27 @@ open class MoviesDriveProvider : MainAPI() {
                 background = meta.background ?: background
                 metaStatus = meta.status
             }
-            
         }
 
         return if (isSeries) {
-                loadSeries(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl, metaStatus)
-            } else {
-                loadMovie(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl, metaStatus)
+            loadSeries(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl, metaStatus)
+        } else {
+            loadMovie(document, title, url, posterUrl, description, cast, genre, imdbRating, year, background, imdbUrl, metaStatus)
+        }
+    }
+
+    private fun buildStatusTag(metaStatus: String?, year: String): String {
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        val parsedYear = year.substringBefore("–").substringBefore("-").trim().toIntOrNull()
+            ?: year.take(4).toIntOrNull()
+        return when {
+            metaStatus?.contains("Ended", true) == true -> "Completed"
+            metaStatus?.contains("Returning", true) == true -> "Ongoing"
+            metaStatus?.contains("Released", true) == true -> "Completed"
+            metaStatus?.contains("Canceled", true) == true -> "Completed"
+            parsedYear != null && parsedYear < currentYear - 1 -> "Completed"
+            parsedYear != null && parsedYear >= currentYear - 1 -> "Ongoing"
+            else -> ""
         }
     }
 
@@ -146,22 +179,25 @@ open class MoviesDriveProvider : MainAPI() {
     ): LoadResponse? {
         val buttons = document.select("h5 > a")
         val sources = mutableListOf<MdEpisodeLink>()
+        Log.d("BingeCloud-MD", "loadMovie: ${buttons.size} buttons found")
         for (button in buttons) {
             val link = button.attr("href")
+            Log.d("BingeCloud-MD", "Fetching button URL: $link")
             val doc = app.get(link).document
             val inner = doc.select("a").filter {
-                it.attr("href").contains(Regex("hubcloud|gdflix|gdlink", RegexOption.IGNORE_CASE))
+                it.attr("href").contains(Regex("hubcloud|gdflix|gdlink|vcloud", RegexOption.IGNORE_CASE))
             }
-            inner.forEach { sources.add(MdEpisodeLink(it.attr("href"))) }
+            Log.d("BingeCloud-MD", "Found ${inner.size} inner links")
+            inner.forEach {
+                Log.d("BingeCloud-MD", "  → ${it.attr("href")}")
+                sources.add(MdEpisodeLink(it.attr("href")))
+            }
         }
-        val statusTag = when {
-    metaStatus?.contains("Released", true) == true -> "Completed"
-    metaStatus?.contains("Returning", true) == true -> "Ongoing"
-    else -> ""
-}
-val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
 
-     return newMovieLoadResponse(title, url, TvType.Movie, sources) {
+        val statusTag = buildStatusTag(metaStatus, year)
+        val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+
+        return newMovieLoadResponse(title, url, TvType.Movie, sources) {
             this.posterUrl = posterUrl
             this.plot = description
             this.tags = tagsWithStatus
@@ -221,23 +257,24 @@ val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
             }
         }
 
+        val fallbackThumb = when {
+            background.isNotBlank() && background != "null" -> background
+            else -> posterUrl
+        }
+
         val episodes = episodesMap.map { (key, urls) ->
             newEpisode(urls.map { MdEpisodeLink(it) }) {
-               this.name = "S${key.first} E${key.second}"
-               this.season = key.first
-               this.episode = key.second
-               this.posterUrl = background
+                this.name = "S${key.first} E${key.second}"
+                this.season = key.first
+                this.episode = key.second
+                this.posterUrl = fallbackThumb
             }
         }
 
-        val statusTag = when {
-             metaStatus?.contains("Ended", true) == true -> "Completed"
-             metaStatus?.contains("Returning", true) == true -> "Ongoing"
-        else -> ""
-     }
-     val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+        val statusTag = buildStatusTag(metaStatus, year)
+        val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
 
-     return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = posterUrl
             this.plot = description
             this.tags = tagsWithStatus
@@ -266,7 +303,7 @@ val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
                 src.contains("gdflix", true) || src.contains("gdlink", true) ->
                     loadExtractor(src, "", subtitleCallback, callback)
                 src.contains("hubcloud", true) || src.contains("vcloud", true) ->
-                VCloud("MD").getUrl(src, "", subtitleCallback, callback)
+                    VCloud("MD").getUrl(src, "", subtitleCallback, callback)
                 else -> loadExtractor(src, "", subtitleCallback, callback)
             }
         }
