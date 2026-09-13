@@ -58,19 +58,20 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         Log.e("BingeCloud", "WebView resolution returned no cookies for $url")
         return null
     }
-
-    return try {
-        val res = app.get(
-            url,
-            referer = referer,
-            cookies = cookies,
-            headers = mapOf("User-Agent" to CF_UA)
+ return try {
+    val res = app.get(
+        url,
+        referer = referer,
+        headers = mapOf(
+            "User-Agent" to CF_UA,
+            "Cookie" to cookies
         )
-        res.text
-    } catch (e: Exception) {
-        Log.e("BingeCloud", "post-WebView GET failed for $url: ${e.message}")
-        null
-    }
+    )
+        res.text 
+} catch (e: Exception) {
+    Log.e("BingeCloud", "post-WebView GET failed for $url: ${e.message}")
+    null
+   }
 }
 
 suspend fun cloudflareGetDoc(url: String, referer: String? = null): Document? {
