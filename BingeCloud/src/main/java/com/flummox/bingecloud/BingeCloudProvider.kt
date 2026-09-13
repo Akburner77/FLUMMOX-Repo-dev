@@ -66,14 +66,15 @@ open class BingeCloudProvider : MainAPI() {
             else -> TvType.Movie
         }
         val yearInt = (this.releaseInfo ?: this.year)?.take(4)?.toIntOrNull()
-        return newMovieSearchResponse(metaName, "$typeStr$SEP$metaId", tvType) {
+        return newMovieSearchResponse(metaName, "/$typeStr$SEP$metaId", tvType) {
             this.posterUrl = this@toSearchResponse.poster
             this.year = yearInt
         }
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val parts = url.split(SEP)
+        val clean = url.removePrefix(mainUrl).removePrefix("/")
+        val parts = clean.split(SEP)
         if (parts.size < 2) return null
         val type = parts[0]
         val metaId = parts[1]
