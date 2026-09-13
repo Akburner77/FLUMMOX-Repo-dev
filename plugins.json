@@ -12,7 +12,7 @@
       "Movie",
       "TvSeries"
     ],
-    "version": 1,
+    "version": 100,
     "internalName": "BingeCloud",
     "description": "BingeCloud - Movies & TV Series",
     "url": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds/BingeCloud.cs3",
