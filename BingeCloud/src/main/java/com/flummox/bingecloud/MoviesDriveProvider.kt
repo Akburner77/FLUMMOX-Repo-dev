@@ -15,7 +15,7 @@ data class MdMeta(
     val poster: String?, val background: String?,
     val name: String?, val description: String?,
     val genre: List<String>?, val imdbRating: String?,
-    val year: String?, val videos: List<MdEpisodeDetails>?
+    val year: String?, val status: String?, val videos: List<MdEpisodeDetails>?
 )
 
 data class MdEpisodeDetails(
@@ -151,10 +151,17 @@ open class MoviesDriveProvider : MainAPI() {
             }
             inner.forEach { sources.add(MdEpisodeLink(it.attr("href"))) }
         }
-        return newMovieLoadResponse(title, url, TvType.Movie, sources) {
+        val statusTag = when {
+    metaStatus?.contains("Released", true) == true -> "Completed"
+    metaStatus?.contains("Returning", true) == true -> "Ongoing"
+    else -> ""
+}
+val tagsWithStatus = if (statusTag.isNotBlank()) genre + statusTag else genre
+
+     return newMovieLoadResponse(title, url, TvType.Movie, sources) {
             this.posterUrl = posterUrl
             this.plot = description
-            this.tags = genre
+            this.tags = tagsWithStatus
             this.score = Score.from10(imdbRating)
             this.year = year.toIntOrNull()
             this.backgroundPosterUrl = background
