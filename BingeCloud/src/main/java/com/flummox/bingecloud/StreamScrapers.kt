@@ -306,32 +306,42 @@ return null
 // ─────────────────────────────────────────
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     return coroutineScope {
-        val vmJob = async {
-            try {
-                val page = vegamoviesFindPage(q.title, q.year, q.type) ?: return@async emptyList()
-                if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
-                else vegamoviesExtractMovieRaw(page)
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "VM task failed: ${e.message}"); emptyList()
-            }
+        val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<ScrapedMirror>>>()
+
+        if (Settings.isSrcVm()) {
+            jobs.add(async {
+                try {
+                    val page = vegamoviesFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                    if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
+                    else vegamoviesExtractMovieRaw(page)
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "VM task failed: ${e.message}"); emptyList()
+                }
+            })
         }
-        val mdJob = async {
-            try {
-                val page = moviesdriveFindPage(q.title, q.year, q.type) ?: return@async emptyList()
-                if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
-                else moviesdriveExtractMovieRaw(page)
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "MD task failed: ${e.message}"); emptyList()
-            }
+        if (Settings.isSrcMd()) {
+            jobs.add(async {
+                try {
+                    val page = moviesdriveFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                    if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
+                    else moviesdriveExtractMovieRaw(page)
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "MD task failed: ${e.message}"); emptyList()
+                }
+            })
         }
-        val hdJob = async {
-            try {
-                val page = hdhub4uFindPage(q.title, q.year, q.type) ?: return@async emptyList()
-                hdhub4uExtractRaw(page)
-            } catch (e: Exception) {
-                Log.e("BingeCloud", "HDH task failed: ${e.message}"); emptyList()
-            }
+        if (Settings.isSrcHdh()) {
+            jobs.add(async {
+                try {
+                    val page = hdhub4uFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                    hdhub4uExtractRaw(page)
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "HDH task failed: ${e.message}"); emptyList()
+                }
+            })
         }
-        listOf(vmJob, mdJob, hdJob).awaitAll().flatten()
+
+        if (jobs.isEmpty()) return@coroutineScope emptyList()
+        jobs.awaitAll().flatten()
     }
 }
