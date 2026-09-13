@@ -164,20 +164,23 @@ open class BingeCloudProvider : MainAPI() {
         Log.d("BingeCloud", "loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
 
         val mirrors = scrapeAllSources(query)
-        if (mirrors.isEmpty()) return false
+        if (mirrors.isEmpty()) {
+            Log.d("BingeCloud", "No mirrors found")
+            return false
+        }
 
         val sorted = mirrors.sortedByDescending { qualityRank(it.quality) }
-        Log.d("BingeCloud", "loadLinks: ${sorted.size} mirrors after sort")
+        Log.d("BingeCloud", "loadLinks: ${sorted.size} raw mirrors — resolving in parallel")
 
         coroutineScope {
             sorted.map { m ->
                 async {
                     try {
-                        when {
-                            m.url.contains("vcloud", true) || m.url.contains("hubcloud", true) ->
-                                VCloud(m.source).getUrl(m.url, "", subtitleCallback, callback)
-                            else ->
-                                loadExtractor(m.url, "", subtitleCallback, callback)
+                        val finalUrl = resolveWrapper(m.url)
+                        if (finalUrl != null) {
+                            VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                        } else {
+                            Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
                         }
                     } catch (e: Exception) {
                         Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
