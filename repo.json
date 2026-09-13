@@ -1,9 +1,9 @@
 {
-  "name": "FLUMMOX Repo",
-  "description": "Movies, TV Series, Anime",
-  "iconUrl": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/icon.png",
+  "name": "FLUMMOX Repo (Dev)",
+  "description": "Dev builds — unstable",
   "manifestVersion": 1,
+  "iconUrl": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/icon.png",
   "pluginLists": [
-    "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds/plugins.json"
+    "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds-dev/plugins.json"
   ]
 }
