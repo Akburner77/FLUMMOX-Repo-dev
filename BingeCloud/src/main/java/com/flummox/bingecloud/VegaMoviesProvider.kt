@@ -188,13 +188,8 @@ open class VegaMoviesProvider : MainAPI() {
                     val castList = mutableListOf<Actor>()
                     aiometa.cast?.forEach { c ->
                         if (!c.name.isNullOrBlank()) {
-                            castList.add(
-                                Actor(
-                                    name = c.name!!,
-                                    roleString = c.character,
-                                    image = c.photo
-                                )
-                            )
+                            val image = if (!c.photo.isNullOrBlank() && c.photo != "null") c.photo else null
+                            castList.add(Actor(c.name!!, image))
                         }
                     }
                     cast = castList
