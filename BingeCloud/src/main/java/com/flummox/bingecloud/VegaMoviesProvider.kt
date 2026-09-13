@@ -202,12 +202,12 @@ if (imdbId.isNotEmpty()) {
             val seasonMirrors = seasonMirrorsMap[ep.season] ?: emptyList()
             if (seasonMirrors.isEmpty()) continue
             episodes.add(newEpisode(seasonMirrors) {
-                this.name = ep.name ?: ep.title ?: "Episode ${ep.episode}"
-                this.season = ep.season
-                this.episode = ep.episode
-                this.posterUrl = ep.thumbnail
-                this.description = ep.overview
-            })
+            this.name = ep.name ?: ep.title ?: "Episode ${ep.episode}"
+            this.season = ep.season
+            this.episode = ep.episode
+            this.posterUrl = if (!ep.thumbnail.isNullOrBlank()) ep.thumbnail else posterUrl
+            this.description = ep.overview
+         })
         }
     } else {
         for ((season, mirrors) in seasonMirrorsMap) {
