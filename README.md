@@ -1,4 +1,4 @@
-# 🎬 FLUMMOX Repo
+# 🎬 FLUMMOX Repo 
 
 A CloudStream plugin repository hosting extensions for streaming Movies, TV Series & Anime.
 
@@ -86,3 +86,4 @@ If you believe content is violating copyright laws, please contact the **actual 
 If you find this project helpful, consider supporting its development.
 
 Thank you for using FLUMMOX Repo !
+
