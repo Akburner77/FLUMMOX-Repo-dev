@@ -139,20 +139,13 @@ open class VCloud : ExtractorApi() {
 
         val document = app.get(link).document
 val header = document.select("div.card-header").text()
-val size = document.select("i#size").text().trim().trim('[', ']')
 val quality = getIndexQuality(header)
-
-// Extract just "1080p", "720p", "480p" from header
 val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p"
 
 suspend fun myCallback(link: String, server: String = "") {
     val serverClean = server.trim('[', ']').trim()
     val label = buildString {
         append(qualityText)
-        if (size.isNotBlank()) {
-            append(" · ")
-            append(size)
-        }
         if (serverClean.isNotBlank()) {
             append(" · ")
             append(serverClean)
