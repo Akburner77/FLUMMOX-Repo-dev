@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -26,6 +29,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
+import kotlin.random.Random
 
 object Settings {
 
@@ -93,21 +97,20 @@ object Settings {
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
     fun isRowEnabled(key: String): Boolean = getKey<Boolean>(key) ?: true
 
-    // ── Sky theme palette ──
+    // ── Sky palette ──
     private const val BG = 0xFF0A0D14.toInt()
     private const val SKY_TOP = 0xFF1E3A5F.toInt()
     private const val SKY_MID = 0xFF142238.toInt()
     private const val SKY_BOTTOM = 0xFF0A0D14.toInt()
-
     private const val CARD = 0xFF0F1520.toInt()
     private const val CARD_BORDER = 0xFF1E2A3D.toInt()
     private const val ROW = 0xFF141B28.toInt()
     private const val INPUT = 0xFF0B1018.toInt()
-
     private const val ACCENT = 0xFF7DD3FC.toInt()
     private const val ACCENT_BG = 0x1A7DD3FC
     private const val ACCENT_STRONG = 0xFF38BDF8.toInt()
-
+    private const val SAVE_GRAD_TOP = 0xFF38BDF8.toInt()
+    private const val SAVE_GRAD_BOTTOM = 0xFF7DD3FC.toInt()
     private const val TEXT = 0xFFE6EDF5.toInt()
     private const val SUBTEXT = 0xFF8296AD.toInt()
     private const val GREEN = 0xFF4ADE80.toInt()
@@ -140,10 +143,96 @@ object Settings {
         setStroke(dp(ctx, 1), 0x337DD3FC)
     }
 
+    private fun saveButtonBg(ctx: Context): GradientDrawable =
+        GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(SAVE_GRAD_TOP, SAVE_GRAD_BOTTOM)
+        ).apply { cornerRadius = dp(ctx, 14).toFloat() }
+
+    private fun cancelButtonBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
+        setColor(0xFF000000.toInt())
+        cornerRadius = dp(ctx, 14).toFloat()
+        setStroke(dp(ctx, 1), CARD_BORDER)
+    }
+
+    // ── Shooting stars canvas ──
+    private class ShootingStarsView(context: Context) : View(context) {
+        private data class Star(
+            var x: Float, var y: Float, var vx: Float, var vy: Float,
+            var length: Float, var alpha: Float, var thickness: Float,
+            var phase: Float
+        )
+
+        private val stars = mutableListOf<Star>()
+        private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeCap = Paint.Cap.ROUND
+        }
+        private val rnd = java.util.Random()
+        private var lastNs = 0L
+
+        init {
+            setWillNotDraw(false)
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val now = System.nanoTime()
+            val dt = if (lastNs == 0L) 0f else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
+            lastNs = now
+
+            // Spawn
+            if (rnd.nextFloat() < 0.03f && stars.size < 6) {
+                val startX = width + 60f + rnd.nextFloat() * 200f
+                val startY = -40f + rnd.nextFloat() * (height * 0.7f)
+                val speed = 280f + rnd.nextFloat() * 260f
+                stars.add(Star(
+                    x = startX, y = startY,
+                    vx = -speed * 0.9f,
+                    vy = speed * 0.55f,
+                    length = 70f + rnd.nextFloat() * 90f,
+                    alpha = 0.55f + rnd.nextFloat() * 0.45f,
+                    thickness = 1.2f + rnd.nextFloat() * 1.6f,
+                    phase = 0f
+                ))
+            }
+
+            val iter = stars.iterator()
+            while (iter.hasNext()) {
+                val s = iter.next()
+                s.x += s.vx * dt
+                s.y += s.vy * dt
+                s.phase += dt * 3f
+                if (s.x < -250f || s.y > height + 80f) { iter.remove(); continue }
+
+                val lenScale = (s.x / width.toFloat()).coerceIn(0f, 1f)
+                val fade = 1f - (1f - lenScale) * 0.6f
+                val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
+
+                // Trail
+                val tx = s.x - s.vx / 280f * s.length
+                val ty = s.y - s.vy / 280f * s.length
+                trailPaint.color = Color.argb(a / 3, 140, 200, 255)
+                trailPaint.strokeWidth = s.thickness * 2.2f
+                canvas.drawLine(s.x, s.y, tx, ty, trailPaint)
+
+                trailPaint.color = Color.argb(a, 200, 235, 255)
+                trailPaint.strokeWidth = s.thickness
+                canvas.drawLine(s.x, s.y, tx, ty, trailPaint)
+
+                // Head glow
+                trailPaint.color = Color.argb((a * 0.9f).toInt(), 255, 255, 255)
+                trailPaint.strokeWidth = s.thickness * 1.8f
+                canvas.drawPoint(s.x, s.y, trailPaint)
+            }
+
+            postInvalidateOnAnimation()
+        }
+    }
+
+    // ── Card ──
     private class Card(
         val root: LinearLayout,
         val body: LinearLayout,
-        val subtitleView: TextView,
         val statusBadge: TextView,
         val chevron: TextView
     )
@@ -168,8 +257,7 @@ object Settings {
             isClickable = true
         }
         header.addView(TextView(ctx).apply {
-            text = emoji; textSize = 18f
-            setPadding(0, 0, dp(ctx, 12), 0)
+            text = emoji; textSize = 18f; setPadding(0, 0, dp(ctx, 12), 0)
         })
         val col = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -178,48 +266,41 @@ object Settings {
         col.addView(TextView(ctx).apply {
             text = title; setTextColor(TEXT); textSize = 16f
         })
-        val sub = TextView(ctx).apply {
-            text = subtitle ?: ""
-            setTextColor(SUBTEXT); textSize = 12f
-            setPadding(0, dp(ctx, 2), 0, 0)
+        if (!subtitle.isNullOrBlank()) {
+            col.addView(TextView(ctx).apply {
+                text = subtitle; setTextColor(SUBTEXT); textSize = 12f
+                setPadding(0, dp(ctx, 2), 0, 0)
+            })
         }
-        col.addView(sub)
         header.addView(col)
-
         val status = TextView(ctx).apply {
-            text = badge ?: ""
-            setTextColor(badgeColor)
-            textSize = 12f
+            text = badge ?: ""; setTextColor(badgeColor); textSize = 12f
             setPadding(dp(ctx, 8), 0, dp(ctx, 8), 0)
             visibility = if (badge.isNullOrBlank()) View.GONE else View.VISIBLE
         }
         header.addView(status)
-
         val chev = TextView(ctx).apply {
             text = if (expanded) "▾" else "▸"
             setTextColor(SUBTEXT); textSize = 14f
             setPadding(dp(ctx, 8), 0, 0, 0)
         }
         header.addView(chev)
-
         root.addView(header)
-
         val bodyLayout = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 12))
             visibility = if (expanded) View.VISIBLE else View.GONE
         }
         root.addView(bodyLayout)
-
         header.setOnClickListener {
             val showing = bodyLayout.visibility == View.VISIBLE
             bodyLayout.visibility = if (showing) View.GONE else View.VISIBLE
             chev.text = if (showing) "▸" else "▾"
         }
-
-        return Card(root, bodyLayout, sub, status, chev)
+        return Card(root, bodyLayout, status, chev)
     }
 
+    // ── Row builders ──
     private fun toggleRow(
         ctx: Context, label: String, desc: String?, initial: Boolean,
         onChange: (Boolean) -> Unit
@@ -413,21 +494,44 @@ object Settings {
             background = bg(BG, 0, ctx)
         }
 
-        // ── Sky header ──
-        root.addView(LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            background = skyGradient(ctx)
-            setPadding(dp(ctx, 22), dp(ctx, 30), dp(ctx, 22), dp(ctx, 26))
-            addView(TextView(ctx).apply {
+        // ── Sky header with shooting stars ──
+        run {
+            val headerFrame = FrameLayout(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 160)
+                )
+                background = skyGradient(ctx)
+                clipChildren = true
+            }
+            val starsView = ShootingStarsView(ctx).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+            headerFrame.addView(starsView)
+
+            val headerContent = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.BOTTOM
+                setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 22))
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+            headerContent.addView(TextView(ctx).apply {
                 text = "☁  BingeCloud"
                 setTextColor(TEXT); textSize = 26f
             })
-            addView(TextView(ctx).apply {
+            headerContent.addView(TextView(ctx).apply {
                 text = "Configure sources, catalogs & cookies"
                 setTextColor(ACCENT); textSize = 12f
                 setPadding(0, dp(ctx, 6), 0, 0)
             })
-        })
+            headerFrame.addView(headerContent)
+            root.addView(headerFrame)
+        }
 
         val scroll = ScrollView(ctx)
         val body = LinearLayout(ctx).apply {
@@ -612,7 +716,7 @@ object Settings {
             val footer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(dp(ctx, 16), dp(ctx, 20), dp(ctx, 16), dp(ctx, 16))
+                setPadding(dp(ctx, 16), dp(ctx, 20), dp(ctx, 16), dp(ctx, 8))
             }
             footer.addView(TextView(ctx).apply {
                 text = "☁  FLUMMOX Repo"
@@ -633,15 +737,50 @@ object Settings {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
+        // ── Custom button bar ──
+        run {
+            val bar = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                background = bg(BG, 0, ctx)
+                setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 12), dp(ctx, 16))
+            }
+
+            val cancel = Button(ctx).apply {
+                text = "Cancel"
+                textSize = 14f
+                setTextColor(SUBTEXT)
+                background = cancelButtonBg(ctx)
+                isAllCaps = false
+                layoutParams = LinearLayout.LayoutParams(0, dp(ctx, 50), 1f)
+                    .apply { rightMargin = dp(ctx, 6) }
+                setOnClickListener { dialog.dismiss() }
+            }
+            val save = Button(ctx).apply {
+                text = "Save & Close"
+                textSize = 14f
+                setTextColor(0xFF0A0D14.toInt())
+                background = saveButtonBg(ctx)
+                isAllCaps = false
+                layoutParams = LinearLayout.LayoutParams(0, dp(ctx, 50), 1.4f)
+                    .apply { leftMargin = dp(ctx, 6) }
+                setOnClickListener {
+                    dialog.dismiss()
+                    onSaved()
+                }
+            }
+            bar.addView(cancel)
+            bar.addView(save)
+            root.addView(bar)
+        }
+
         dialog = AlertDialog.Builder(ctx)
             .setView(root)
-            .setPositiveButton("Save & Close") { _, _ -> onSaved() }
-            .setNegativeButton("Cancel", null)
             .create()
+        dialog.window?.setBackgroundDrawable(bg(BG, 20, ctx))
         dialog.show()
     }
 
-    // ── WebViews (unchanged) ──
+    // ── WebViews ──
     @SuppressLint("SetJavaScriptEnabled")
     private fun openCfWebView(ctx: Context, startUrl: String, domain: String) {
         val dlg = Dialog(ctx)
@@ -695,15 +834,15 @@ object Settings {
         }
         bar.addView(Button(ctx).apply {
             text = "Close"; textSize = 13f; setTextColor(TEXT)
-            background = bg(ROW, 20, ctx)
+            background = bg(ROW, 20, ctx); isAllCaps = false
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { rightMargin = dp(ctx, 8) }
             setOnClickListener { dlg.dismiss() }
         })
         bar.addView(Button(ctx).apply {
-            text = "🍪  Save Cookies"; textSize = 13f; setTextColor(TEXT)
-            background = accentPill(ctx)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            text = "🍪  Save Cookies"; textSize = 13f; setTextColor(0xFF0A0D14.toInt())
+            background = saveButtonBg(ctx); isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
                 .apply { leftMargin = dp(ctx, 8) }
             setOnClickListener {
                 val cookie = CookieManager.getInstance().getCookie(startUrl) ?: ""
@@ -778,15 +917,15 @@ object Settings {
         }
         bar.addView(Button(ctx).apply {
             text = "Close"; textSize = 13f; setTextColor(TEXT)
-            background = bg(ROW, 20, ctx)
+            background = bg(ROW, 20, ctx); isAllCaps = false
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { rightMargin = dp(ctx, 8) }
             setOnClickListener { dlg.dismiss() }
         })
         bar.addView(Button(ctx).apply {
-            text = "🔑  Save Token"; textSize = 13f; setTextColor(TEXT)
-            background = accentPill(ctx)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            text = "🔑  Save Token"; textSize = 13f; setTextColor(0xFF0A0D14.toInt())
+            background = saveButtonBg(ctx); isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
                 .apply { leftMargin = dp(ctx, 8) }
             setOnClickListener {
                 val cookie = CookieManager.getInstance().getCookie("https://www.febbox.com") ?: ""
