@@ -25,10 +25,9 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class BingeCloudPlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(VegaMoviesProvider())
-        registerMainAPI(MoviesDriveProvider())
+        registerMainAPI(BingeCloudProvider())
         registerExtractorAPI(VCloud())
-        
-       
+        registerExtractorAPI(GDirect())
+        registerExtractorAPI(Filepress())
     }
 }
