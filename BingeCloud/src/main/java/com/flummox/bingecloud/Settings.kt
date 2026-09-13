@@ -34,18 +34,20 @@ object Settings {
     const val K_CF_DOMAINS = "bingecloud_cf_domains"
     const val K_CF_COOKIE_PREFIX = "bingecloud_cf_cookie_"
     const val K_FEBBOX_TOKEN = "bingecloud_febbox_token"
-    const val K_FEBBOX_EMAIL = "bingecloud_febbox_email"
     const val K_SRC_VM = "bingecloud_src_vm"
     const val K_SRC_MD = "bingecloud_src_md"
     const val K_SRC_HDH = "bingecloud_src_hdh"
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
     const val K_QUALITY = "bingecloud_quality"
+    const val K_PREFILTER = "bingecloud_prefilter"
     const val K_ROW_TRENDING_MOVIES = "bingecloud_row_trending_movies"
     const val K_ROW_TRENDING_SERIES = "bingecloud_row_trending_series"
     const val K_ROW_POPULAR_MOVIES = "bingecloud_row_popular_movies"
     const val K_ROW_POPULAR_SERIES = "bingecloud_row_popular_series"
     const val K_ROW_TVDB_MOVIES = "bingecloud_row_tvdb_movies"
     const val K_ROW_TVDB_SERIES = "bingecloud_row_tvdb_series"
+    const val K_ROW_TVDB_GENRES_MOVIES = "bingecloud_row_tvdb_genres_movies"
+    const val K_ROW_TVDB_GENRES_SERIES = "bingecloud_row_tvdb_genres_series"
     const val K_ROW_TOP_ANIME = "bingecloud_row_top_anime"
     const val K_ROW_AIRING_ANIME = "bingecloud_row_airing_anime"
     const val K_ROW_UPCOMING_ANIME = "bingecloud_row_upcoming_anime"
@@ -54,8 +56,15 @@ object Settings {
     const val K_ROW_MOST_POPULAR_ANIME = "bingecloud_row_most_popular_anime"
     const val K_ROW_MOST_FAV_ANIME = "bingecloud_row_most_fav_anime"
     const val K_ROW_BEST_2020S = "bingecloud_row_best_2020s"
+    const val K_ROW_BEST_2010S = "bingecloud_row_best_2010s"
+    const val K_ROW_BEST_2000S = "bingecloud_row_best_2000s"
+    const val K_ROW_BEST_90S = "bingecloud_row_best_90s"
+    const val K_ROW_BEST_80S = "bingecloud_row_best_80s"
+    const val K_ROW_HINDI_MOVIES = "bingecloud_row_hindi_movies"
+    const val K_ROW_HINDI_SERIES = "bingecloud_row_hindi_series"
+    const val K_ROW_ANIME_SCHEDULE = "bingecloud_row_anime_schedule"
 
-    val DEFAULT_CF_DOMAINS = listOf("anidao.to")
+    val DEFAULT_CF_DOMAINS = emptyList<String>()
 
     // ── Getters ──
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 15).coerceIn(1, 50)
@@ -81,20 +90,26 @@ object Settings {
     fun isSrcHdh(): Boolean = getKey<Boolean>(K_SRC_HDH) ?: true
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
+    fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
     fun isRowEnabled(key: String): Boolean = getKey<Boolean>(key) ?: true
 
     // ── Sky theme palette ──
     private const val BG = 0xFF0A0D14.toInt()
-    private const val HEADER_TOP = 0xFF101822.toInt()
-    private const val HEADER_BOTTOM = 0xFF0A0D14.toInt()
-    private const val CARD = 0xFF11151F.toInt()
-    private const val BORDER = 0xFF1E2430.toInt()
-    private const val ROW = 0xFF161B27.toInt()
-    private const val INPUT = 0xFF0C1019.toInt()
-    private const val ACCENT = 0xFF38BDF8.toInt()
-    private const val ACCENT_BG = 0x2238BDF8
-    private const val TEXT = 0xFFF0F4F8.toInt()
-    private const val SUBTEXT = 0xFF7A8798.toInt()
+    private const val SKY_TOP = 0xFF1E3A5F.toInt()
+    private const val SKY_MID = 0xFF142238.toInt()
+    private const val SKY_BOTTOM = 0xFF0A0D14.toInt()
+
+    private const val CARD = 0xFF0F1520.toInt()
+    private const val CARD_BORDER = 0xFF1E2A3D.toInt()
+    private const val ROW = 0xFF141B28.toInt()
+    private const val INPUT = 0xFF0B1018.toInt()
+
+    private const val ACCENT = 0xFF7DD3FC.toInt()
+    private const val ACCENT_BG = 0x1A7DD3FC
+    private const val ACCENT_STRONG = 0xFF38BDF8.toInt()
+
+    private const val TEXT = 0xFFE6EDF5.toInt()
+    private const val SUBTEXT = 0xFF8296AD.toInt()
     private const val GREEN = 0xFF4ADE80.toInt()
     private const val RED = 0xFFF87171.toInt()
 
@@ -107,21 +122,28 @@ object Settings {
             cornerRadius = dp(ctx, radiusDp).toFloat()
         }
 
+    private fun skyGradient(ctx: Context): GradientDrawable =
+        GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(SKY_TOP, SKY_MID, SKY_BOTTOM)
+        ).apply { cornerRadius = 0f }
+
     private fun cardBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
         setColor(CARD)
         cornerRadius = dp(ctx, 14).toFloat()
-        setStroke(dp(ctx, 1), BORDER)
+        setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    private fun headerBg(ctx: Context): GradientDrawable =
-        GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            intArrayOf(HEADER_TOP, HEADER_BOTTOM)
-        ).apply { cornerRadius = 0f }
+    private fun accentPill(ctx: Context): GradientDrawable = GradientDrawable().apply {
+        setColor(ACCENT_BG)
+        cornerRadius = dp(ctx, 20).toFloat()
+        setStroke(dp(ctx, 1), 0x337DD3FC)
+    }
 
     private class Card(
         val root: LinearLayout,
         val body: LinearLayout,
+        val subtitleView: TextView,
         val statusBadge: TextView,
         val chevron: TextView
     )
@@ -146,7 +168,8 @@ object Settings {
             isClickable = true
         }
         header.addView(TextView(ctx).apply {
-            text = emoji; textSize = 18f; setPadding(0, 0, dp(ctx, 12), 0)
+            text = emoji; textSize = 18f
+            setPadding(0, 0, dp(ctx, 12), 0)
         })
         val col = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -155,12 +178,12 @@ object Settings {
         col.addView(TextView(ctx).apply {
             text = title; setTextColor(TEXT); textSize = 16f
         })
-        if (!subtitle.isNullOrBlank()) {
-            col.addView(TextView(ctx).apply {
-                text = subtitle; setTextColor(SUBTEXT); textSize = 12f
-                setPadding(0, dp(ctx, 2), 0, 0)
-            })
+        val sub = TextView(ctx).apply {
+            text = subtitle ?: ""
+            setTextColor(SUBTEXT); textSize = 12f
+            setPadding(0, dp(ctx, 2), 0, 0)
         }
+        col.addView(sub)
         header.addView(col)
 
         val status = TextView(ctx).apply {
@@ -181,23 +204,22 @@ object Settings {
 
         root.addView(header)
 
-        val body = LinearLayout(ctx).apply {
+        val bodyLayout = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 12))
             visibility = if (expanded) View.VISIBLE else View.GONE
         }
-        root.addView(body)
+        root.addView(bodyLayout)
 
         header.setOnClickListener {
-            val showing = body.visibility == View.VISIBLE
-            body.visibility = if (showing) View.GONE else View.VISIBLE
+            val showing = bodyLayout.visibility == View.VISIBLE
+            bodyLayout.visibility = if (showing) View.GONE else View.VISIBLE
             chev.text = if (showing) "▸" else "▾"
         }
 
-        return Card(root, body, status, chev)
+        return Card(root, bodyLayout, sub, status, chev)
     }
 
-    // ── Row builders ──
     private fun toggleRow(
         ctx: Context, label: String, desc: String?, initial: Boolean,
         onChange: (Boolean) -> Unit
@@ -307,8 +329,8 @@ object Settings {
         row.addView(col)
         row.addView(Button(ctx).apply {
             text = buttonText; textSize = 13f
-            setTextColor(buttonColor)
-            background = bg(if (buttonColor == RED) 0x22F87171 else ACCENT_BG, 18, ctx)
+            setTextColor(if (buttonColor == RED) RED else ACCENT_STRONG)
+            background = if (buttonColor == RED) bg(0x22F87171, 18, ctx) else accentPill(ctx)
             setPadding(dp(ctx, 16), dp(ctx, 6), dp(ctx, 16), dp(ctx, 6))
             minHeight = 0; minWidth = 0
             setOnClickListener { onClick() }
@@ -344,8 +366,8 @@ object Settings {
         row.addView(col)
         row.addView(Button(ctx).apply {
             text = if (hasCookie) "Reopen" else "Open"
-            textSize = 12f; setTextColor(ACCENT)
-            background = bg(ACCENT_BG, 18, ctx)
+            textSize = 12f; setTextColor(ACCENT_STRONG)
+            background = accentPill(ctx)
             setPadding(dp(ctx, 14), dp(ctx, 6), dp(ctx, 14), dp(ctx, 6))
             minHeight = 0; minWidth = 0
             setOnClickListener { onOpen() }
@@ -391,18 +413,19 @@ object Settings {
             background = bg(BG, 0, ctx)
         }
 
-        // ── Header ──
+        // ── Sky header ──
         root.addView(LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            background = headerBg(ctx)
-            setPadding(dp(ctx, 22), dp(ctx, 26), dp(ctx, 22), dp(ctx, 24))
+            background = skyGradient(ctx)
+            setPadding(dp(ctx, 22), dp(ctx, 30), dp(ctx, 22), dp(ctx, 26))
             addView(TextView(ctx).apply {
-                text = "BingeCloud"; setTextColor(TEXT); textSize = 24f
+                text = "☁  BingeCloud"
+                setTextColor(TEXT); textSize = 26f
             })
             addView(TextView(ctx).apply {
                 text = "Configure sources, catalogs & cookies"
                 setTextColor(ACCENT); textSize = 12f
-                setPadding(0, dp(ctx, 4), 0, 0)
+                setPadding(0, dp(ctx, 6), 0, 0)
             })
         })
 
@@ -436,17 +459,24 @@ object Settings {
             c.body.addView(labelBlock(ctx, "Protected sites",
                 "Open a WebView, solve the challenge, tap Save Cookies."))
 
-            val allDomains = (DEFAULT_CF_DOMAINS + saved).distinct()
-            for (domain in allDomains) {
-                val has = getCookieForDomain(domain) != null
-                c.body.addView(domainRow(
-                    ctx, domain, has,
-                    onOpen = { openCfWebView(ctx, "https://$domain", domain) },
-                    onClear = {
-                        clearCookieForDomain(domain); refresh()
-                        Toast.makeText(ctx, "Cleared $domain", Toast.LENGTH_SHORT).show()
-                    }
-                ))
+            if (saved.isEmpty()) {
+                c.body.addView(TextView(ctx).apply {
+                    text = "No domains saved yet. Add one below."
+                    setTextColor(SUBTEXT); textSize = 12f
+                    setPadding(dp(ctx, 14), dp(ctx, 8), dp(ctx, 14), dp(ctx, 8))
+                })
+            } else {
+                for (domain in saved) {
+                    val has = getCookieForDomain(domain) != null
+                    c.body.addView(domainRow(
+                        ctx, domain, has,
+                        onOpen = { openCfWebView(ctx, "https://$domain", domain) },
+                        onClear = {
+                            clearCookieForDomain(domain); refresh()
+                            Toast.makeText(ctx, "Cleared $domain", Toast.LENGTH_SHORT).show()
+                        }
+                    ))
+                }
             }
 
             c.body.addView(actionRow(
@@ -469,7 +499,7 @@ object Settings {
                 ctx,
                 if (has) "You're signed in"
                 else "Sign in to unlock ShowBox/FebBox sources",
-                if (has) "Token saved — nothing else to do."
+                if (has) "Session saved — nothing else to do."
                 else "A WebView will open. Log in with your FebBox account and tap Save Token."
             ))
             c.body.addView(actionRow(
@@ -528,33 +558,75 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── 6. Homepage ──
+        // ── 6. Pre-filter ──
+        run {
+            val c = buildCard(ctx, "🧪", "Link Validation", "Pre-filter dead links")
+            c.body.addView(toggleRow(
+                ctx, "Pre-filter unreachable",
+                "Test each link before showing it in the dialog (slightly slower)",
+                isPrefilterEnabled()
+            ) { setKey(K_PREFILTER, it) })
+            body.addView(c.root)
+        }
+
+        // ── 7. Homepage ──
         run {
             val rowsSpec = listOf(
                 Triple("Trending Movies", K_ROW_TRENDING_MOVIES, "TMDB"),
                 Triple("Trending Series", K_ROW_TRENDING_SERIES, "TMDB"),
                 Triple("Popular Movies", K_ROW_POPULAR_MOVIES, "TMDB"),
                 Triple("Popular Series", K_ROW_POPULAR_SERIES, "TMDB"),
+                Triple("Hindi Movies", K_ROW_HINDI_MOVIES, "TMDB • Hindi"),
+                Triple("Hindi Series", K_ROW_HINDI_SERIES, "TMDB • Hindi"),
                 Triple("TVDB Trending Movies", K_ROW_TVDB_MOVIES, "TVDB"),
                 Triple("TVDB Trending Series", K_ROW_TVDB_SERIES, "TVDB"),
+                Triple("TVDB Genres Movies", K_ROW_TVDB_GENRES_MOVIES, "TVDB"),
+                Triple("TVDB Genres Series", K_ROW_TVDB_GENRES_SERIES, "TVDB"),
                 Triple("Top Anime", K_ROW_TOP_ANIME, "MAL"),
                 Triple("Airing Now", K_ROW_AIRING_ANIME, "MAL"),
                 Triple("Upcoming Anime", K_ROW_UPCOMING_ANIME, "MAL"),
+                Triple("Airing Schedule", K_ROW_ANIME_SCHEDULE, "MAL"),
                 Triple("Top Anime Movies", K_ROW_TOP_ANIME_MOVIES, "MAL"),
                 Triple("Top Anime Series", K_ROW_TOP_ANIME_SERIES, "MAL"),
                 Triple("Most Popular Anime", K_ROW_MOST_POPULAR_ANIME, "MAL"),
                 Triple("Most Favorited Anime", K_ROW_MOST_FAV_ANIME, "MAL"),
                 Triple("Best of 2020s", K_ROW_BEST_2020S, "MAL"),
+                Triple("Best of 2010s", K_ROW_BEST_2010S, "MAL"),
+                Triple("Best of 2000s", K_ROW_BEST_2000S, "MAL"),
+                Triple("Best of 90s", K_ROW_BEST_90S, "MAL"),
+                Triple("Best of 80s", K_ROW_BEST_80S, "MAL"),
             )
             val on = rowsSpec.count { isRowEnabled(it.second) }
             val c = buildCard(
-                ctx, "☁️", "Homepage", "$on of ${rowsSpec.size} sections",
+                ctx, "🏠", "Homepage", "$on of ${rowsSpec.size} sections",
                 badge = "$on/${rowsSpec.size}"
             )
             for ((label, key, source) in rowsSpec) {
                 c.body.addView(toggleRow(ctx, label, source, isRowEnabled(key)) { setKey(key, it) })
             }
             body.addView(c.root)
+        }
+
+        // ── Footer ──
+        run {
+            val footer = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(ctx, 16), dp(ctx, 20), dp(ctx, 16), dp(ctx, 16))
+            }
+            footer.addView(TextView(ctx).apply {
+                text = "☁  FLUMMOX Repo"
+                setTextColor(SUBTEXT); textSize = 13f
+                gravity = Gravity.CENTER
+            })
+            footer.addView(TextView(ctx).apply {
+                text = "BINGECLOUD  •  EXTENSION"
+                setTextColor(0xFF3D4A5C.toInt()); textSize = 10f
+                letterSpacing = 0.15f
+                setPadding(0, dp(ctx, 4), 0, 0)
+                gravity = Gravity.CENTER
+            })
+            body.addView(footer)
         }
 
         root.addView(scroll, LinearLayout.LayoutParams(
@@ -569,25 +641,20 @@ object Settings {
         dialog.show()
     }
 
-    // ── Cloudflare WebView ──
+    // ── WebViews (unchanged) ──
     @SuppressLint("SetJavaScriptEnabled")
     private fun openCfWebView(ctx: Context, startUrl: String, domain: String) {
         val dlg = Dialog(ctx)
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
-
         val layout = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            background = bg(BG, 0, ctx)
+            orientation = LinearLayout.VERTICAL; background = bg(BG, 0, ctx)
         }
         val urlBar = TextView(ctx).apply {
-            text = startUrl
-            setTextColor(SUBTEXT); textSize = 11f
-            background = bg(HEADER_TOP, 0, ctx)
-            setPadding(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 10))
-            maxLines = 1
+            text = startUrl; setTextColor(SUBTEXT); textSize = 11f
+            background = bg(SKY_MID, 0, ctx)
+            setPadding(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 10)); maxLines = 1
         }
         layout.addView(urlBar)
-
         val wvWrap = FrameLayout(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -623,7 +690,7 @@ object Settings {
 
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = bg(HEADER_TOP, 0, ctx)
+            background = bg(SKY_MID, 0, ctx)
             setPadding(dp(ctx, 12), dp(ctx, 12), dp(ctx, 12), dp(ctx, 12))
         }
         bar.addView(Button(ctx).apply {
@@ -635,7 +702,7 @@ object Settings {
         })
         bar.addView(Button(ctx).apply {
             text = "🍪  Save Cookies"; textSize = 13f; setTextColor(TEXT)
-            background = bg(ACCENT_BG, 20, ctx)
+            background = accentPill(ctx)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { leftMargin = dp(ctx, 8) }
             setOnClickListener {
@@ -651,11 +718,9 @@ object Settings {
             }
         })
         layout.addView(bar)
-
         dlg.setContentView(layout)
         dlg.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         )
         dlg.setOnDismissListener {
             try { wv.stopLoading(); wv.destroy() } catch (_: Exception) {}
@@ -663,24 +728,20 @@ object Settings {
         dlg.show()
     }
 
-    // ── FebBox login WebView ──
     @SuppressLint("SetJavaScriptEnabled")
     private fun openFebBoxLogin(ctx: Context, onSaved: () -> Unit) {
         val dlg = Dialog(ctx)
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
-
         val layout = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            background = bg(BG, 0, ctx)
+            orientation = LinearLayout.VERTICAL; background = bg(BG, 0, ctx)
         }
         val banner = TextView(ctx).apply {
             text = "Sign in to FebBox. Your session is stored locally."
             setTextColor(SUBTEXT); textSize = 12f
-            background = bg(HEADER_TOP, 0, ctx)
+            background = bg(SKY_MID, 0, ctx)
             setPadding(dp(ctx, 16), dp(ctx, 12), dp(ctx, 16), dp(ctx, 12))
         }
         layout.addView(banner)
-
         val wvWrap = FrameLayout(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -712,7 +773,7 @@ object Settings {
 
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = bg(HEADER_TOP, 0, ctx)
+            background = bg(SKY_MID, 0, ctx)
             setPadding(dp(ctx, 12), dp(ctx, 12), dp(ctx, 12), dp(ctx, 12))
         }
         bar.addView(Button(ctx).apply {
@@ -724,7 +785,7 @@ object Settings {
         })
         bar.addView(Button(ctx).apply {
             text = "🔑  Save Token"; textSize = 13f; setTextColor(TEXT)
-            background = bg(ACCENT_BG, 20, ctx)
+            background = accentPill(ctx)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { leftMargin = dp(ctx, 8) }
             setOnClickListener {
@@ -744,11 +805,9 @@ object Settings {
             }
         })
         layout.addView(bar)
-
         dlg.setContentView(layout)
         dlg.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         )
         dlg.setOnDismissListener {
             try { wv.stopLoading(); wv.destroy() } catch (_: Exception) {}
