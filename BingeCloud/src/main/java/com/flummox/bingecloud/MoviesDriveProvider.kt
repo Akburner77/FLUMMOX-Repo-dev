@@ -248,7 +248,7 @@ open class MoviesDriveProvider : MainAPI() {
                 src.contains("gdflix", true) || src.contains("gdlink", true) ->
                     loadExtractor(src, "", subtitleCallback, callback)
                 src.contains("hubcloud", true) || src.contains("vcloud", true) ->
-                    VCloud().getUrl(src, "", subtitleCallback, callback)
+                VCloud("MD").getUrl(src, "", subtitleCallback, callback)
                 else -> loadExtractor(src, "", subtitleCallback, callback)
             }
         }
