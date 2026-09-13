@@ -87,7 +87,7 @@ suspend fun resolveFinalUrl(startUrl: String): String? {
 // ─────────────────────────────────────────────────────────
 // V-CLOUD EXTRACTOR
 // ─────────────────────────────────────────────────────────
-open class VCloud : ExtractorApi() {
+open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
     override val name: String = "V-Cloud"
     override val mainUrl: String = "https://vcloud.*"
     override val requiresReferer = false
@@ -144,8 +144,13 @@ val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p
 
 suspend fun myCallback(link: String, server: String = "") {
     val serverClean = server.trim('[', ']').trim()
+        .replace(Regex("""\s*\d{3,4}[pP]\s*$"""), "").trim()
     val label = buildString {
         append(qualityText)
+        if (sourceTag.isNotBlank()) {
+            append(" · ")
+            append(sourceTag)
+        }
         if (serverClean.isNotBlank()) {
             append(" · ")
             append(serverClean)
