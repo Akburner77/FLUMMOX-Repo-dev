@@ -395,37 +395,37 @@ open class VegaMoviesProvider : MainAPI() {
 
 fun cleanTitle(raw: String): String {
     var t = raw
-    t = t.replace(Regex("""\[[^\]]*]"""), "")
-    t = t.replace(Regex("""\{[^}]*}"""), "")
-    t = t.replace(Regex("""\((?:19|20)\d{2}\)"""), "")
+    t = Regex("\\[.*?\\]").replace(t, "")
+    t = Regex("\\{.*?\\}").replace(t, "")
+    t = Regex("\\((?:19|20)\\d{2}\\)").replace(t, "")
     val junkPatterns = listOf(
-        """(?i)\bdual\s*audio\b""",
-        """(?i)\bmulti\s*audio\b""",
-        """(?i)\bhindi\s*\+\s*english\b""",
-        """(?i)\bhindi[\s\-]?korean\b""",
-        """(?i)\badded\b""",
-        """(?i)\bweb[\s\-]?dl\b""",
-        """(?i)\bweb[\s\-]?rip\b""",
-        """(?i)\bblu[\s\-]?ray\b""",
-        """(?i)\bhdr[\s\-]?rip\b""",
-        """(?i)\bhdtv\b""",
-        """(?i)\bx264\b""",
-        """(?i)\bx265\b""",
-        """(?i)\bhevc\b""",
-        """(?i)\besubs?\b""",
-        """(?i)\bdownload\b""",
-        """(?i)\bamzn\b""",
-        """(?i)\bdd[p5][\.\d]*\b""",
-        """(?i)\b5\.1\b""",
-        """(?i)\b7\.1\b""",
-        """(?i)\b\d{3,4}[pP]\b""",
-        """(?i)\b(?:2160|1080|720|480|360)p?\b""",
-        """(?i)\b\d+(?:\.\d+)?\s*(?:MB|GB)\b"""
+        "(?i)\\bdual\\s*audio\\b",
+        "(?i)\\bmulti\\s*audio\\b",
+        "(?i)\\bhindi\\s*\\+\\s*english\\b",
+        "(?i)\\bhindi[\\s\\-]?korean\\b",
+        "(?i)\\badded\\b",
+        "(?i)\\bweb[\\s\\-]?dl\\b",
+        "(?i)\\bweb[\\s\\-]?rip\\b",
+        "(?i)\\bblu[\\s\\-]?ray\\b",
+        "(?i)\\bhdr[\\s\\-]?rip\\b",
+        "(?i)\\bhdtv\\b",
+        "(?i)\\bx264\\b",
+        "(?i)\\bx265\\b",
+        "(?i)\\bhevc\\b",
+        "(?i)\\besubs?\\b",
+        "(?i)\\bdownload\\b",
+        "(?i)\\bamzn\\b",
+        "(?i)\\bdd[p5][\\.\\d]*\\b",
+        "(?i)\\b5\\.1\\b",
+        "(?i)\\b7\\.1\\b",
+        "(?i)\\b\\d{3,4}[pP]\\b",
+        "(?i)\\b(?:2160|1080|720|480|360)p?\\b",
+        "(?i)\\b\\d+(?:\\.\\d+)?\\s*(?:MB|GB)\\b"
     )
     for (p in junkPatterns) {
-        t = t.replace(Regex(p), " ")
+        t = Regex(p).replace(t, " ")
     }
-    t = t.replace(Regex("""\s+"""), " ").trim()
+    t = Regex("\\s+").replace(t, " ").trim()
     t = t.trim('-', '|', ':', '·', '.', ' ')
     return t.ifBlank { raw }
 }
