@@ -144,7 +144,23 @@ object Settings {
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
-    fun isRowEnabled(key: String): Boolean = getKey<Boolean>(key) ?: true
+    /**
+ * Rows enabled by default for new users (or after clearing app data).
+ * Every other row defaults to OFF — user can toggle them in settings.
+ */
+    private val DEFAULT_ON_ROWS = setOf(
+        K_ROW_TRENDING_MOVIES,
+        K_ROW_TRENDING_SERIES,
+        K_ROW_POPULAR_MOVIES,
+        K_ROW_POPULAR_SERIES,
+        K_ROW_HINDI_MOVIES,
+        K_ROW_HINDI_SERIES,
+        K_ROW_TOP_ANIME,
+        K_ROW_AIRING_ANIME
+    )
+
+    fun isRowEnabled(key: String): Boolean =
+        getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
 
     private const val BG = 0xFF0A0D14.toInt()
     private const val SKY_TOP = 0xFF1E3A5F.toInt()
