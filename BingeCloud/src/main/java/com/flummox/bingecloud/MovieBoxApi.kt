@@ -199,12 +199,15 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
             val headers = buildHeaders("GET", fullUrl, "application/json", "application/json", null, session)
             val res = app.get(fullUrl, headers = headers)
             BCLog.d("MB GET $host$path -> ${res.code}")
+            if (res.code !in 200..299) {
+            BCLog.d("MB body: ${res.text.take(500)}")
+            }
             if (res.code in 200..299) {
                 return try { JSONObject(res.text) } catch (e: Exception) {
                     BCLog.e("MB JSON parse: ${e.message}"); null
                 }
             }
-            if (res.code == 401 && !retried) {
+            if ((res.code == 401 || res.code == 404) && !retried) {
                 BCLog.d("MB: 401, re-bootstrap")
                 mbSession = null
                 return mbGet(path, query, true)
