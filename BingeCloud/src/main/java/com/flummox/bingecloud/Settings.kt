@@ -50,6 +50,7 @@ object Settings {
     const val K_SRC_MD = "bingecloud_src_md"
     const val K_SRC_HDH = "bingecloud_src_hdh"
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
+    const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
     const val K_ROW_ORDER = "bingecloud_row_order"
@@ -105,6 +106,17 @@ object Settings {
         RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best of 80s", "Action", "MAL"),
     )
 
+    private val DEFAULT_ON_ROWS = setOf(
+        K_ROW_TRENDING_MOVIES,
+        K_ROW_TRENDING_SERIES,
+        K_ROW_POPULAR_MOVIES,
+        K_ROW_POPULAR_SERIES,
+        K_ROW_HINDI_MOVIES,
+        K_ROW_HINDI_SERIES,
+        K_ROW_TOP_ANIME,
+        K_ROW_AIRING_ANIME
+    )
+
     fun getRowOrder(): List<String> {
         val stored = getKey<String>(K_ROW_ORDER) ?: ""
         val parts = stored.split("|").map { it.trim() }.filter { it.isNotBlank() }
@@ -142,23 +154,9 @@ object Settings {
     fun isSrcMd(): Boolean = getKey<Boolean>(K_SRC_MD) ?: true
     fun isSrcHdh(): Boolean = getKey<Boolean>(K_SRC_HDH) ?: true
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
+    fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
-    /**
- * Rows enabled by default for new users (or after clearing app data).
- * Every other row defaults to OFF — user can toggle them in settings.
- */
-    private val DEFAULT_ON_ROWS = setOf(
-        K_ROW_TRENDING_MOVIES,
-        K_ROW_TRENDING_SERIES,
-        K_ROW_POPULAR_MOVIES,
-        K_ROW_POPULAR_SERIES,
-        K_ROW_HINDI_MOVIES,
-        K_ROW_HINDI_SERIES,
-        K_ROW_TOP_ANIME,
-        K_ROW_AIRING_ANIME
-    )
-
     fun isRowEnabled(key: String): Boolean =
         getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
 
@@ -743,14 +741,15 @@ object Settings {
         }
 
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcFebBox()).count { it }
+            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcFebBox()).count { it }
             val c = buildCard(
-                ctx, "📡", "Sources", "$on of 4 enabled",
-                badge = "$on/4"
+                ctx, "📡", "Sources", "$on of 5 enabled",
+                badge = "$on/5"
             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
+            c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
             c.body.addView(toggleRow(ctx, "FebBox", "Requires sign-in above", isSrcFebBox()) { setKey(K_SRC_FEBBOX, it) })
             body.addView(c.root)
         }
