@@ -541,46 +541,58 @@ object Settings {
     }
 
     private fun rowReorderItem(
-        ctx: Context, spec: RowSpec, position: Int, total: Int,
-        onMoveUp: () -> Unit, onMoveDown: () -> Unit
-    ): LinearLayout {
-        val row = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = bg(ROW, 10, ctx)
-            setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 12), dp(ctx, 10))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(ctx, 6) }
-        }
-        // Position number
-        row.addView(TextView(ctx).apply {
-            text = "${position + 1}"
-            setTextColor(SUBTEXT); textSize = 12f
-            gravity = Gravity.CENTER
-            val s = dp(ctx, 26)
-            layoutParams = LinearLayout.LayoutParams(s, s)
-            background = bg(INPUT, 12, ctx)
-        })
-        // Label
-        val col = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { leftMargin = dp(ctx, 10) }
-        }
-        col.addView(TextView(ctx).apply {
-            text = spec.name; setTextColor(TEXT); textSize = 13f
-        })
-        col.addView(TextView(ctx).apply {
-            text = spec.sourceLabel; setTextColor(SUBTEXT); textSize = 10f
-            setPadding(0, dp(ctx, 2), 0, 0)
-        })
-        row.addView(col)
+    ctx: Context, spec: RowSpec, position: Int, total: Int,
+    onToggle: (Boolean) -> Unit,
+    onMoveUp: () -> Unit, onMoveDown: () -> Unit
+): LinearLayout {
+    val row = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = bg(ROW, 10, ctx)
+        setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(ctx, 6) }
+    }
 
-        // Arrows
-        row.addView(makeArrowBtn(ctx, "▲", position > 0) { onMoveUp() })
-        row.addView(makeArrowBtn(ctx, "▼", position < total - 1) { onMoveDown() })
-        return row
+    // Position number
+    row.addView(TextView(ctx).apply {
+        text = "${position + 1}"
+        setTextColor(SUBTEXT); textSize = 12f
+        gravity = Gravity.CENTER
+        val s = dp(ctx, 26)
+        layoutParams = LinearLayout.LayoutParams(s, s)
+        background = bg(INPUT, 12, ctx)
+    })
+
+    // Label + source
+    val col = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            .apply { leftMargin = dp(ctx, 8); rightMargin = dp(ctx, 4) }
+    }
+    col.addView(TextView(ctx).apply {
+        text = spec.name; setTextColor(TEXT); textSize = 13f
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+    })
+    col.addView(TextView(ctx).apply {
+        text = spec.sourceLabel; setTextColor(SUBTEXT); textSize = 10f
+        setPadding(0, dp(ctx, 2), 0, 0)
+    })
+    row.addView(col)
+
+    // Toggle switch
+    val sw = Switch(ctx).apply {
+        isChecked = Settings.isRowEnabled(spec.key)
+        setOnCheckedChangeListener { _: CompoundButton, v: Boolean -> onToggle(v) }
+    }
+    row.addView(sw)
+
+    // Arrows
+    row.addView(makeArrowBtn(ctx, "▲", position > 0) { onMoveUp() })
+    row.addView(makeArrowBtn(ctx, "▼", position < total - 1) { onMoveDown() })
+    return row
     }
 
     // ── Main dialog ──
@@ -798,30 +810,34 @@ object Settings {
                 c.statusBadge.visibility = View.VISIBLE
 
                 for ((idx, key) in order.withIndex()) {
-                    val spec = getRowSpecByKey(key) ?: continue
-                    listHolder.addView(rowReorderItem(
-                        ctx, spec, idx, total,
-                        onMoveUp = {
-                            val current = getRowOrder().toMutableList()
-                            val i = current.indexOf(key)
-                            if (i > 0) {
-                                current[i] = current[i - 1]
-                                current[i - 1] = key
-                                setRowOrder(current)
-                                renderList()
-                            }
-                        },
-                        onMoveDown = {
-                            val current = getRowOrder().toMutableList()
-                            val i = current.indexOf(key)
-                            if (i >= 0 && i < current.size - 1) {
-                                current[i] = current[i + 1]
-                                current[i + 1] = key
-                                setRowOrder(current)
-                                renderList()
-                            }
-                        }
-                    ))
+    val spec = getRowSpecByKey(key) ?: continue
+    listHolder.addView(rowReorderItem(
+        ctx, spec, idx, total,
+        onToggle = { enabled ->
+            setKey(spec.key, enabled)
+            renderList()
+        },
+        onMoveUp = {
+            val current = getRowOrder().toMutableList()
+            val i = current.indexOf(key)
+            if (i > 0) {
+                current[i] = current[i - 1]
+                current[i - 1] = key
+                setRowOrder(current)
+                renderList()
+            }
+        },
+        onMoveDown = {
+            val current = getRowOrder().toMutableList()
+            val i = current.indexOf(key)
+            if (i >= 0 && i < current.size - 1) {
+                current[i] = current[i + 1]
+                current[i + 1] = key
+                setRowOrder(current)
+                renderList()
+            }
+        }
+    ))
                 }
             }
 
@@ -832,8 +848,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // Footer
-        run {
+        // FFooter  run {
             val footer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
