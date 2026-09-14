@@ -194,7 +194,6 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
     BCLog.d("MD: extracted ${results.size} mirrors")
     results
 }
-
 /** Series extraction — same detail structure, filter by season if labeled. */
 private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> = coroutineScope {
     val doc = safeGet(pageUrl) ?: return@coroutineScope emptyList()
