@@ -1,7 +1,6 @@
 package com.flummox.bingecloud
 
 import android.util.Base64
-import com.lagradost.api.Log
 import com.lagradost.cloudstream3.app
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -82,30 +81,19 @@ private fun buildSignedHeaders(
     bearer: String?
 ): Map<String, String> {
     val ts = System.currentTimeMillis().toString()
-    val xClientToken = "$ts,${md5Hex(ts.reversed().toByteArray())}"
-
-    val accept = "application/json"
     val contentType = "application/json"
-    val bodyBytes = body.toByteArray()
-    val bodyLen = bodyBytes.size.toString()
-    val bodyMd5 = md5Hex(bodyBytes.copyOfRange(0, minOf(bodyBytes.size, 102_400)))
 
-    val sortedQuery = query
-        ?.split("&")
-        ?.filter { it.isNotBlank() }
-        ?.sorted()
-        ?.joinToString("&")
-        ?: ""
-    val pathWithQuery = if (sortedQuery.isEmpty()) path else "$path?$sortedQuery"
+    val xClientToken = "$ts,${md5Hex(ts.toByteArray())}"
+    val bodyMd5 = md5Hex(body.toByteArray())
 
+    // Canonical string — 6 lines
     val canonical = listOf(
         method.uppercase(),
-        accept,
         contentType,
-        bodyLen,
-        ts,
         bodyMd5,
-        pathWithQuery
+        ts,
+        query ?: "",
+        path
     ).joinToString("\n")
 
     val signature = hmacMd5Base64(canonical.toByteArray(), MB_SECRET.toByteArray())
@@ -128,7 +116,7 @@ private fun buildSignedHeaders(
 
     val headers = mutableMapOf(
         "User-Agent" to ua,
-        "Accept" to accept,
+        "Accept" to "application/json",
         "Content-Type" to contentType,
         "Connection" to "keep-alive",
         "x-client-token" to xClientToken,
@@ -157,20 +145,21 @@ private suspend fun mbLogin(): String? {
                 headers = headers,
                 requestBody = body.toRequestBody(JSON_MEDIA)
             )
-            Log.d("BingeCloud-MB", "login $host -> ${res.code}")
+            BCLog.d("MB login $host -> ${res.code}")
             if (res.code in 200..299) {
                 val text = res.text
+                BCLog.d("MB login body: ${text.take(200)}")
                 val obj = JSONObject(text)
                 val token = obj.optString("token").ifBlank {
                     obj.optJSONObject("data")?.optString("token") ?: ""
                 }
                 if (token.isNotBlank()) {
-                    Log.d("BingeCloud-MB", "login success, token len=${token.length}")
+                    BCLog.d("MB login success, token len=${token.length}")
                     return token
                 }
             }
         } catch (e: Exception) {
-            Log.w("BingeCloud-MB", "login $host failed: ${e.message}")
+            BCLog.e("MB login $host failed: ${e.message}")
         }
     }
     return null
@@ -178,8 +167,14 @@ private suspend fun mbLogin(): String? {
 
 private suspend fun ensureSession(): String? {
     mbSession?.let { return it }
+    BCLog.d("MB: no cached session, logging in...")
     val t = mbLogin()
-    if (t != null) mbSession = t
+    if (t != null) {
+        BCLog.d("MB: login OK (token ${t.length} chars)")
+        mbSession = t
+    } else {
+        BCLog.e("MB: login FAILED — all hosts rejected")
+    }
     return t
 }
 
@@ -192,7 +187,7 @@ private suspend fun mbGet(
     retried: Boolean = false
 ): JSONObject? {
     val session = ensureSession() ?: run {
-        Log.e("BingeCloud-MB", "no session for GET $path")
+        BCLog.e("MB: no session for GET $path")
         return null
     }
     for (host in MB_HOSTS.shuffled()) {
@@ -203,17 +198,20 @@ private suspend fun mbGet(
             else
                 "https://$host$path?$query"
             val res = app.get(url, headers = headers)
-            Log.d("BingeCloud-MB", "GET $host$path -> ${res.code}")
+            BCLog.d("MB GET $host$path -> ${res.code}")
             if (res.code in 200..299) {
-                return try { JSONObject(res.text) } catch (_: Exception) { null }
+                return try { JSONObject(res.text) } catch (e: Exception) {
+                    BCLog.e("MB: JSON parse failed: ${e.message}")
+                    null
+                }
             }
             if (res.code == 401 && !retried) {
-                Log.d("BingeCloud-MB", "session expired, re-login")
+                BCLog.d("MB: session expired, re-login")
                 mbSession = null
                 return mbGet(path, query, true)
             }
         } catch (e: Exception) {
-            Log.w("BingeCloud-MB", "GET $host failed: ${e.message}")
+            BCLog.e("MB GET $host failed: ${e.message}")
         }
     }
     return null
@@ -226,7 +224,7 @@ private suspend fun mbPost(
     retried: Boolean = false
 ): JSONObject? {
     val session = ensureSession() ?: run {
-        Log.e("BingeCloud-MB", "no session for POST $path")
+        BCLog.e("MB: no session for POST $path")
         return null
     }
     for (host in MB_HOSTS.shuffled()) {
@@ -241,16 +239,19 @@ private suspend fun mbPost(
                 headers = headers,
                 requestBody = body.toRequestBody(JSON_MEDIA)
             )
-            Log.d("BingeCloud-MB", "POST $host$path -> ${res.code}")
+            BCLog.d("MB POST $host$path -> ${res.code}")
             if (res.code in 200..299) {
-                return try { JSONObject(res.text) } catch (_: Exception) { null }
+                return try { JSONObject(res.text) } catch (e: Exception) {
+                    BCLog.e("MB: JSON parse failed: ${e.message}")
+                    null
+                }
             }
             if (res.code == 401 && !retried) {
                 mbSession = null
                 return mbPost(path, body, query, true)
             }
         } catch (e: Exception) {
-            Log.w("BingeCloud-MB", "POST $host failed: ${e.message}")
+            BCLog.e("MB POST $host failed: ${e.message}")
         }
     }
     return null
@@ -277,11 +278,19 @@ data class MBStream(
 // ─────────────────────────────────────────
 suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     val q = "keyword=${URLEncoder.encode(query, "UTF-8")}&page=$page&perPage=20"
-    val json = mbGet("/wefeed-mobile-bff/subject/search", q) ?: return emptyList()
+    BCLog.d("MB: GET /subject/search?$q")
+    val json = mbGet("/wefeed-mobile-bff/subject/search", q) ?: run {
+        BCLog.e("MB: search GET returned null")
+        return emptyList()
+    }
+    BCLog.d("MB: search response: ${json.toString().take(300)}")
 
     val itemsArray = json.optJSONObject("data")?.optJSONArray("items")
         ?: json.optJSONArray("items")
-        ?: return emptyList()
+        ?: run {
+            BCLog.e("MB: no 'items' array in response")
+            return emptyList()
+        }
 
     val out = mutableListOf<MBSubject>()
     for (i in 0 until itemsArray.length()) {
@@ -307,12 +316,19 @@ suspend fun mbDetail(subjectId: String): JSONObject? {
 
 suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
-    val json = mbGet("/wefeed-mobile-bff/subject/play", q) ?: return emptyList()
+    BCLog.d("MB: GET /subject/play?$q")
+    val json = mbGet("/wefeed-mobile-bff/subject/play", q) ?: run {
+        BCLog.e("MB: play GET returned null")
+        return emptyList()
+    }
 
     val root = json.optJSONObject("data") ?: json
     val streamsArr = root.optJSONArray("streams")
         ?: root.optJSONArray("videos")
-        ?: return emptyList()
+        ?: run {
+            BCLog.e("MB: no 'streams' in play response")
+            return emptyList()
+        }
 
     val out = mutableListOf<MBStream>()
     for (i in 0 until streamsArr.length()) {
