@@ -184,31 +184,45 @@ open class BingeCloudProvider : MainAPI() {
 
         val sem = Semaphore(concurrency)
         coroutineScope {
-        sorted.map { m ->
-        async {
-            val prefilterPassed = if (prefilter && m.source != "MB") {
-                val earlyUrl = resolveWrapper(m.url)
-                earlyUrl != null && isHubcloudAlive(earlyUrl)
-            } else true
-            if (!prefilterPassed) {
-                BCLog.d("prefilter dropped: ${m.mirror}")
-                return@async
-            }
-            sem.withPermit {
-                try {
-                    if (m.source == "MB") {
+            sorted.map { m ->
+                async {
+                    sem.withPermit {
+                        try {
+                            if (m.source == "MB") {
+                                val linkType = when {
+                                    m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                    m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                    else -> ExtractorLinkType.VIDEO
+                                }
+
+                                // Diagnostic — verify cookie works via OkHttp before handing to player
+                                val cookieHeader = m.headers?.get("Cookie") ?: ""
+                                BCLog.d("MB cookie len=${cookieHeader.length} url=${m.url.take(120)}")
+                                try {
+                                    val testRes = com.lagradost.cloudstream3.app.get(
+                                        m.url,
+                                        headers = mapOf(
+                                            "Cookie" to cookieHeader,
+                                            "User-Agent" to "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+                                        ),
+                                        timeout = 6000L
+                                    )
+                                    BCLog.d("MB test GET -> ${testRes.code} bodyLen=${testRes.text.length}")
+                                } catch (e: Exception) {
+                                    BCLog.e("MB test failed: ${e.message}")
+                                }
+
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "MovieBox",
                                         name = "MovieBox · ${m.quality}",
                                         url = m.url,
-                                        type = if (m.url.contains(".m3u8"))
-                                            ExtractorLinkType.M3U8
-                                        else ExtractorLinkType.VIDEO
+                                        type = linkType
                                     ) {
-                                        this.referer = "https://www.febbox.com"
+                                        this.referer = "https://h5.aoneroom.com/"
                                         this.quality = qualityRank(m.quality)
                                             .takeIf { it > 0 } ?: Qualities.Unknown.value
+                                        m.headers?.forEach { (k, v) -> this.headers[k] = v }
                                     }
                                 )
                                 return@withPermit
@@ -218,8 +232,10 @@ open class BingeCloudProvider : MainAPI() {
                             if (finalUrl == null) {
                                 BCLog.d("unresolved: ${m.mirror} ${m.url}")
                                 return@withPermit
-                            
-                            
+                            }
+                            if (prefilter && !isHubcloudAlive(finalUrl)) {
+                                BCLog.d("prefilter dropped: ${m.mirror}")
+                                return@withPermit
                             }
                             VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
                         } catch (e: Exception) {
