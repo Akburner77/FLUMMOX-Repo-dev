@@ -150,9 +150,9 @@ private suspend fun mbLogin(): String? {
         try {
             val headers = buildSignedHeaders("POST", path, null, body, null)
             val res = app.post(
-                "https://$host$path",
+                url = "https://$host$path",
                 headers = headers,
-                data = body
+                json = JSONObject(body)
             )
             Log.d("BingeCloud-MB", "login $host -> ${res.code}")
             if (res.code in 200..299) {
@@ -194,12 +194,16 @@ private suspend fun mbGet(
     }
     for (host in MB_HOSTS.shuffled()) {
         try {
-            val headers = buildSignedHeaders("GET", path, query, "", session)
+            val headers = buildSignedHeaders("POST", path, query, body, session)
             val url = if (query.isNullOrBlank())
                 "https://$host$path"
             else
                 "https://$host$path?$query"
-            val res = app.get(url, headers = headers)
+            val res = app.post(
+                url = url,
+                headers = headers,
+                json = JSONObject(body)
+            )
             Log.d("BingeCloud-MB", "GET $host$path -> ${res.code}")
             if (res.code in 200..299) {
                 return try { JSONObject(res.text) } catch (_: Exception) { null }
