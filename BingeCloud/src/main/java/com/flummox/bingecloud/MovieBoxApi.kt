@@ -29,6 +29,9 @@ private val MB_HOSTS = listOf(
     "api3.aoneroom.com"
 )
 
+private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
+private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
+
 private val mbDeviceIdLock = Any()
 private var mbDeviceId: String? = null
 private fun deviceId(): String {
