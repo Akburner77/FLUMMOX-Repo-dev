@@ -184,11 +184,19 @@ open class BingeCloudProvider : MainAPI() {
 
         val sem = Semaphore(concurrency)
         coroutineScope {
-            sorted.map { m ->
-                async {
-                    sem.withPermit {
-                        try {
-                            if (m.source == "MB") {
+        sorted.map { m ->
+        async {
+            val prefilterPassed = if (prefilter && m.source != "MB") {
+                val earlyUrl = resolveWrapper(m.url)
+                earlyUrl != null && isHubcloudAlive(earlyUrl)
+            } else true
+            if (!prefilterPassed) {
+                BCLog.d("prefilter dropped: ${m.mirror}")
+                return@async
+            }
+            sem.withPermit {
+                try {
+                    if (m.source == "MB") {
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "MovieBox",
@@ -210,10 +218,8 @@ open class BingeCloudProvider : MainAPI() {
                             if (finalUrl == null) {
                                 BCLog.d("unresolved: ${m.mirror} ${m.url}")
                                 return@withPermit
-                            }
-                            if (prefilter && !isHubcloudAlive(finalUrl)) {
-                                BCLog.d("prefilter dropped: ${m.mirror}")
-                                return@withPermit
+                            
+                            
                             }
                             VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
                         } catch (e: Exception) {
