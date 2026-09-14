@@ -59,9 +59,9 @@ private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
     }
 }
 
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 // VegaMovies
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 private suspend fun vegamoviesFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("vegamovies", "https://vegamovies.mq")
     BCLog.d("VM: searching '$title' on $domain")
@@ -139,19 +139,19 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
     return out
 }
 
-// ─────────────────────────────────────────
-// MoviesDrive
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
+// MoviesDrive — NEW search.html + h5 > a extraction
+// ═══════════════════════════════════════════
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
-    BCLog.d("MD: searching '$title' on $domain")
+    BCLog.d("MD: searching '$title' via search.html on $domain")
     return try {
-        val html = app.get("$domain/?s=${URLEncoder.encode(title, "UTF-8")}").text
+        val html = app.get("$domain/search.html?q=${URLEncoder.encode(title, "UTF-8")}").text
         val doc = Jsoup.parse(html)
         val cards = doc.select("#moviesGridMain > a")
         BCLog.d("MD: ${cards.size} result cards")
         if (cards.isEmpty()) {
-            BCLog.e("MD: selector '#moviesGridMain > a' returned 0 (site markup may have changed)")
+            BCLog.e("MD: selector '#moviesGridMain > a' returned 0")
         }
         var bestUrl: String? = null
         var bestScore = 0
@@ -169,75 +169,100 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
         }
         if (bestUrl != null) BCLog.d("MD: matched $bestUrl (score=$bestScore)")
         else BCLog.d("MD: no title match")
-        bestUrl
+        bestUrl?.let { if (it.startsWith("http")) it else "$domain$it" }
     } catch (e: Exception) {
         BCLog.e("MD search failed: ${e.message}")
         null
     }
 }
 
+/** Movie extraction — follow each "Download" button, parse intermediate page for hubcloud/gdflix/gdlink */
 private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(pageUrl) ?: return out
-    val headers = doc.select("h5").filter {
-        val txt = it.text()
-        txt.contains(Regex("""\d{3,4}[pP]""")) && !txt.contains("Zip", true)
-    }
-    BCLog.d("MD: found ${headers.size} quality headers on movie page")
-    for (h in headers) {
-        val q = Regex("""(\d{3,4}[pP])""").find(h.text())?.value ?: continue
-        var cursor = h.nextElementSibling()
-        var steps = 0
-        while (cursor != null && steps < 4) {
-            val link = cursor.selectFirst("a[href*='archive']")
-                ?: cursor.selectFirst("a[href*='mdrive']")
-                ?: cursor.selectFirst("a[href]")
-            if (link != null && link.attr("href").isNotEmpty()) {
-                out.add(ScrapedMirror(q, "MoviesDrive", link.attr("href"), "MD"))
-                break
-            }
-            if (cursor.tagName() == "h5" &&
-                Regex("""\d{3,4}[pP]""").containsMatchIn(cursor.text())) break
-            cursor = cursor.nextElementSibling()
-            steps++
+    val buttons = doc.select("h5 > a")
+    BCLog.d("MD: ${buttons.size} download buttons on movie page")
+    for (button in buttons) {
+        val href = button.attr("href")
+        if (href.isEmpty()) continue
+        val parentText = button.parent()?.text() ?: button.text()
+        val q = Regex("""(\d{3,4}[pP])""").find(parentText)?.value ?: "Unknown"
+        val intermediateDoc = safeGet(href) ?: continue
+        val innerLinks = intermediateDoc.select("a").filter {
+            val h = it.attr("href")
+            h.contains("hubcloud", true) || h.contains("gdflix", true) || h.contains("gdlink", true)
+        }
+        BCLog.d("MD: q=$q intermediate ${href.take(60)} -> ${innerLinks.size} inner links")
+        for (link in innerLinks) {
+            val source = link.attr("href")
+            if (source.isEmpty()) continue
+            out.add(ScrapedMirror(q, "MoviesDrive", source, "MD"))
         }
     }
     BCLog.d("MD: extracted ${out.size} mirrors")
     return out
 }
 
+/** Series extraction — walk "h5 > a" buttons, follow episode page, parse episode spans */
 private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(pageUrl) ?: return out
-    val allH5 = doc.select("h5")
-    for (i in allH5.indices) {
-        val h = allH5[i]
-        val txt = h.text()
-        val sMatch = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(txt) ?: continue
-        val s = sMatch.groupValues[1].toIntOrNull() ?: continue
-        if (s != season) continue
-        val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
-        var j = i + 1
-        while (j < allH5.size && j < i + 4) {
-            val next = allH5[j]
-            val nextTxt = next.text()
-            if (Regex("""Season\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(nextTxt) &&
-                nextTxt.contains(Regex("""\d{3,4}[pP]"""))) break
-            if (nextTxt.contains("Single Episode", true)) {
-                val href = next.selectFirst("a")?.attr("href") ?: ""
-                if (href.isNotEmpty()) out.add(ScrapedMirror(q, "MoviesDrive", href, "MD"))
-                break
+    val buttons = doc.select("h5 > a").filter { !it.text().contains("Zip", true) }
+    BCLog.d("MD: ${buttons.size} season/series buttons")
+
+    for (button in buttons) {
+        val titleElement = button.parent()?.previousElementSibling()
+        val mainTitle = titleElement?.text() ?: button.parent()?.text() ?: ""
+        val realSeason = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
+            .find(mainTitle)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        if (realSeason != season) continue
+
+        val episodePageUrl = button.attr("href")
+        if (episodePageUrl.isEmpty()) continue
+        val epDoc = safeGet(episodePageUrl) ?: continue
+
+        var elements = epDoc.select("span:matches((?i)(Ep))")
+        if (elements.isEmpty()) {
+            elements = epDoc.select("a:matches((?i)(HubCloud|GDFlix))")
+        }
+        BCLog.d("MD: S$season episode page -> ${elements.size} elements")
+
+        var currentEp = 1
+        for (el in elements) {
+            if (el.tagName() == "span") {
+                currentEp = Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE)
+                    .find(el.toString())?.groupValues?.getOrNull(1)?.toIntOrNull() ?: currentEp
+                var sibling = el.parent()?.nextElementSibling()
+                while (sibling != null) {
+                    val txt = sibling.text()
+                    if (txt.contains("HubCloud", true) || txt.contains("gdflix", true) || txt.contains("gdlink", true)) {
+                        val aTag = sibling.selectFirst("a")
+                        val epUrl = aTag?.attr("href") ?: ""
+                        if (epUrl.isNotEmpty() && currentEp == episode) {
+                            val q = Regex("""(\d{3,4}[pP])""").find(mainTitle)?.value ?: "Unknown"
+                            out.add(ScrapedMirror(q, "MoviesDrive", epUrl, "MD"))
+                        }
+                        sibling = sibling.nextElementSibling()
+                    } else break
+                }
+                currentEp++
+            } else {
+                val epUrl = el.attr("href")
+                if (epUrl.isNotEmpty() && currentEp == episode) {
+                    val q = Regex("""(\d{3,4}[pP])""").find(mainTitle)?.value ?: "Unknown"
+                    out.add(ScrapedMirror(q, "MoviesDrive", epUrl, "MD"))
+                }
+                currentEp++
             }
-            j++
         }
     }
     BCLog.d("MD: series S${season}E${episode} -> ${out.size} mirrors")
     return out
 }
 
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 // HDhub4u
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 private suspend fun hdhub4uFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
     BCLog.d("HDH: searching '$title' on $domain")
@@ -300,9 +325,9 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
     return out
 }
 
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 // MovieBox — native API
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 private suspend fun movieboxFindSubject(title: String, year: String, type: String): MBSubject? {
     val results = try { mbSearch(title) } catch (e: Exception) {
         BCLog.e("MB search failed: ${e.message}")
@@ -345,9 +370,9 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     }
 }
 
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 // Wrapper resolution
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 suspend fun resolveWrapper(url: String): String? {
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
@@ -364,9 +389,9 @@ suspend fun resolveWrapper(url: String): String? {
     return null
 }
 
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 // Entry
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     BCLog.section("scrapeAllSources: ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
     return coroutineScope {
