@@ -26,9 +26,6 @@ data class ScrapedMirror(
     val source: String
 )
 
-// ─────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────
 private suspend fun resolveDomain(key: String, fallback: String): String {
     return try {
         val json = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json").text
@@ -63,7 +60,7 @@ private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
 }
 
 // ─────────────────────────────────────────
-// VegaMovies — raw scrape
+// VegaMovies
 // ─────────────────────────────────────────
 private suspend fun vegamoviesFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("vegamovies", "https://vegamovies.mq")
@@ -132,7 +129,7 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
 }
 
 // ─────────────────────────────────────────
-// MoviesDrive — raw scrape
+// MoviesDrive
 // ─────────────────────────────────────────
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
@@ -217,7 +214,7 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
 }
 
 // ─────────────────────────────────────────
-// HDhub4u — raw scrape
+// HDhub4u
 // ─────────────────────────────────────────
 private suspend fun hdhub4uFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
@@ -253,13 +250,10 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
     for (a in anchors) {
         val href = a.attr("href").trim()
         if (href.isEmpty() || href.startsWith("#") || !href.startsWith("http")) continue
-
-        // Skip junk
         if (href.contains("t.me/") || href.contains("whatsapp") || href.contains("telegram")) continue
         if (href.contains("hdstream4u.com") || href.contains("greenmountmotors.com")) continue
         if (href.contains("hdhub4u.") && href.contains("/category/")) continue
 
-        // Only accept known wrapper/stream hosts
         val isWrapper =
             href.contains("hubdrive.", true) ||
             href.contains("hubcdn.", true) ||
@@ -280,29 +274,69 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
 }
 
 // ─────────────────────────────────────────
-// Wrapper resolution — called from loadLinks
+// MovieBox — native API
+// ─────────────────────────────────────────
+private suspend fun movieboxFindSubject(title: String, year: String, type: String): MBSubject? {
+    val results = try { mbSearch(title) } catch (e: Exception) {
+        Log.e("BingeCloud", "MB search failed: ${e.message}")
+        return null
+    }
+    if (results.isEmpty()) return null
+
+    val expectedType = if (type == "series") 2 else 1
+    var best: MBSubject? = null
+    var bestScore = 0
+    for (s in results) {
+        if (!titleMatches(title, s.title)) continue
+        var score = 1
+        if (year.isNotBlank() && s.year?.toString()?.contains(year) == true) score += 2
+        if (s.type == expectedType) score += 2
+        if (score > bestScore) { bestScore = score; best = s }
+    }
+    return best
+}
+
+private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
+    val subject = movieboxFindSubject(q.title, q.year, q.type) ?: return emptyList()
+    Log.d("BingeCloud", "MB matched: ${subject.title} (${subject.year}) id=${subject.subjectId}")
+    val streams = try {
+        mbPlay(subject.subjectId, q.season, q.episode)
+    } catch (e: Exception) {
+        Log.e("BingeCloud", "MB play failed: ${e.message}")
+        emptyList()
+    }
+    Log.d("BingeCloud", "MB streams: ${streams.size}")
+    return streams.map { s ->
+        ScrapedMirror(
+            quality = s.quality.ifBlank { "Auto" },
+            mirror = "MovieBox",
+            url = s.url,
+            source = "MB"
+        )
+    }
+}
+
+// ─────────────────────────────────────────
+// Wrapper resolution
 // ─────────────────────────────────────────
 suspend fun resolveWrapper(url: String): String? {
-    // Already a final HubCloud / VCloud URL — pass through
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
-
-    // Known dead ends
     if (url.contains("greenmountmotors.com")) return null
     if (url.contains("hdstream4u.com")) return null
 
-    // Fetch wrapper, look for hubcloud / vcloud anchor
     val doc = cloudflareGetDoc(url)
     if (doc == null) {
-    Log.e("BingeCloud", "resolveWrapper: fetch failed for $url")
+        Log.e("BingeCloud", "resolveWrapper: fetch failed for $url")
+        return null
+    }
+    doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
+    doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
     return null
 }
-doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
-doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
-return null
-}
+
 // ─────────────────────────────────────────
-// Main entry — parallel across sources
+// Entry
 // ─────────────────────────────────────────
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     return coroutineScope {
@@ -340,17 +374,21 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                 }
             })
         }
+        if (Settings.isSrcMovieBox()) {
+            jobs.add(async {
+                try {
+                    movieboxExtractRaw(q)
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "MB task failed: ${e.message}"); emptyList()
+                }
+            })
+        }
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
         jobs.awaitAll().flatten()
     }
 }
 
-/**
- * Fast liveness check for a HubCloud / VCloud page.
- * Uses a 2.5s GET with HTML marker inspection.
- * A dead page returns either a 4xx or a placeholder HTML without the player markers.
- */
 suspend fun isHubcloudAlive(url: String): Boolean {
     return try {
         val html = app.get(url, timeout = 2500L).text
