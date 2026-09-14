@@ -172,31 +172,27 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
 }
 
 /** Movie extraction — detail page has h5 > a pointing to mdrive.lol/archive/NNN. */
-private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMirror> {
-    val out = mutableListOf<ScrapedMirror>()
-    val doc = safeGet(pageUrl) ?: return out
-
-    // Walk each h5, look at next sibling h5 for the archive link
+private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMirror> = coroutineScope {
+    val doc = safeGet(pageUrl) ?: return@coroutineScope emptyList()
     val allH5 = doc.select("h5")
+    val jobs = mutableListOf<Pair<String, String>>()
     for (i in allH5.indices) {
-        val h = allH5[i]
-        val txt = h.text()
+        val txt = allH5[i].text()
         val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
-        // Look at next 1-3 siblings for mdrive.lol/archive link
         for (j in i + 1 until minOf(i + 4, allH5.size)) {
             val anchor = allH5[j].selectFirst("a[href*='mdrive.lol/archive/'], a[href*='moviesdrives']")
                 ?: allH5[j].selectFirst("a[href*='archive']")
                 ?: continue
             val archiveUrl = anchor.attr("href")
-            if (archiveUrl.isEmpty()) continue
-            BCLog.d("MD: quality $q → $archiveUrl")
-            val inner = extractFromArchivePage(archiveUrl, q)
-            out.addAll(inner)
+            if (archiveUrl.isNotEmpty()) jobs.add(q to archiveUrl)
             break
         }
     }
-    BCLog.d("MD: extracted ${out.size} mirrors")
-    return out
+    val results = jobs.map { (q, archiveUrl) ->
+        async { extractFromArchivePage(archiveUrl, q) }
+    }.awaitAll().flatten()
+    BCLog.d("MD: extracted ${results.size} mirrors")
+    results
 }
 
 /** Series extraction — same detail structure, filter by season if labeled. */
