@@ -345,3 +345,20 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         jobs.awaitAll().flatten()
     }
 }
+
+/**
+ * Fast liveness check for a HubCloud / VCloud page.
+ * Uses a 2.5s GET with HTML marker inspection.
+ * A dead page returns either a 4xx or a placeholder HTML without the player markers.
+ */
+suspend fun isHubcloudAlive(url: String): Boolean {
+    return try {
+        val html = app.get(url, timeout = 2500L).text
+        html.contains("card-header", true) ||
+            html.contains("File Size", true) ||
+            html.contains("btn-success", true) ||
+            html.contains("btn-danger", true)
+    } catch (e: Exception) {
+        false
+    }
+}
