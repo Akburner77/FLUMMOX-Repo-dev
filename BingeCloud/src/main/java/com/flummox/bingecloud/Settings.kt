@@ -3,10 +3,13 @@ package com.flummox.bingecloud
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
@@ -178,6 +181,7 @@ object Settings {
     private const val GREEN = 0xFF4ADE80.toInt()
     private const val RED = 0xFFF87171.toInt()
     private const val DISABLED = 0xFF3A4555.toInt()
+    private const val LOG_TEXT = 0xFFB8C4D4.toInt()
 
     private fun dp(ctx: Context, v: Int): Int =
         (v * ctx.resources.displayMetrics.density).toInt()
@@ -741,16 +745,15 @@ object Settings {
         }
 
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcFebBox()).count { it }
+            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox()).count { it }
             val c = buildCard(
-                ctx, "📡", "Sources", "$on of 5 enabled",
-                badge = "$on/5"
+                ctx, "📡", "Sources", "$on of 4 enabled",
+                badge = "$on/4"
             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
             c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
-            c.body.addView(toggleRow(ctx, "FebBox", "Requires sign-in above", isSrcFebBox()) { setKey(K_SRC_FEBBOX, it) })
             body.addView(c.root)
         }
 
@@ -785,6 +788,73 @@ object Settings {
                 "Test each link before showing it in the dialog (slightly slower)",
                 isPrefilterEnabled()
             ) { setKey(K_PREFILTER, it) })
+            body.addView(c.root)
+        }
+
+        // ── Debug Logs ──
+        run {
+            val c = buildCard(
+                ctx, "🐞", "Debug Logs",
+                "${BCLog.count()} lines • tap ▸ to expand"
+            )
+
+            val logView = TextView(ctx).apply {
+                typeface = Typeface.MONOSPACE
+                textSize = 10f
+                setTextColor(LOG_TEXT)
+                background = bg(INPUT, 8, ctx)
+                setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
+                setTextIsSelectable(true)
+                text = BCLog.all()
+            }
+
+            val logScroll = ScrollView(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 320)
+                ).apply {
+                    leftMargin = dp(ctx, 8)
+                    rightMargin = dp(ctx, 8)
+                    bottomMargin = dp(ctx, 6)
+                }
+                background = bg(INPUT, 8, ctx)
+            }
+            logScroll.addView(logView)
+
+            val btnRow = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 4))
+            }
+
+            fun smallBtn(label: String, color: Int, onClick: () -> Unit) = Button(ctx).apply {
+                text = label
+                textSize = 12f
+                setTextColor(color)
+                background = accentPill(ctx)
+                isAllCaps = false
+                setPadding(dp(ctx, 12), dp(ctx, 6), dp(ctx, 12), dp(ctx, 6))
+                minHeight = 0; minWidth = 0
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                ).apply { leftMargin = dp(ctx, 4); rightMargin = dp(ctx, 4) }
+                setOnClickListener { onClick() }
+            }
+
+            btnRow.addView(smallBtn("Refresh", ACCENT_STRONG) {
+                logView.text = BCLog.all()
+                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+            })
+            btnRow.addView(smallBtn("Copy", ACCENT_STRONG) {
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("BingeCloud Logs", BCLog.all()))
+                Toast.makeText(ctx, "Logs copied", Toast.LENGTH_SHORT).show()
+            })
+            btnRow.addView(smallBtn("Clear", RED) {
+                BCLog.clear()
+                logView.text = "(cleared)"
+            })
+
+            c.body.addView(logScroll)
+            c.body.addView(btnRow)
             body.addView(c.root)
         }
 
