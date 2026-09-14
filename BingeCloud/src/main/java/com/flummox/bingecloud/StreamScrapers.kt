@@ -196,37 +196,33 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
 }
 
 /** Series extraction — same detail structure, filter by season if labeled. */
-private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> {
-    val out = mutableListOf<ScrapedMirror>()
-    val doc = safeGet(pageUrl) ?: return out
-
+private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> = coroutineScope {
+    val doc = safeGet(pageUrl) ?: return@coroutineScope emptyList()
     val allH5 = doc.select("h5")
+    val jobs = mutableListOf<Pair<String, String>>()
     for (i in allH5.indices) {
-        val h = allH5[i]
-        val txt = h.text()
+        val txt = allH5[i].text()
         val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
-        // If text mentions a season and it's not ours, skip
         val sMatch = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(txt)
         if (sMatch != null) {
             val s = sMatch.groupValues[1].toIntOrNull() ?: 0
             if (s != season) continue
         }
-        // Skip "Zip" links
         if (txt.contains("Zip", true)) continue
         for (j in i + 1 until minOf(i + 4, allH5.size)) {
             val anchor = allH5[j].selectFirst("a[href*='mdrive.lol/archive/']")
                 ?: allH5[j].selectFirst("a[href*='archive']")
                 ?: continue
             val archiveUrl = anchor.attr("href")
-            if (archiveUrl.isEmpty()) continue
-            BCLog.d("MD: S$season q=$q → $archiveUrl")
-            val inner = extractFromArchivePage(archiveUrl, q, episode)
-            out.addAll(inner)
+            if (archiveUrl.isNotEmpty()) jobs.add(q to archiveUrl)
             break
         }
     }
-    BCLog.d("MD: series S${season}E${episode} → ${out.size} mirrors")
-    return out
+    val results = jobs.map { (q, archiveUrl) ->
+        async { extractFromArchivePage(archiveUrl, q, episode) }
+    }.awaitAll().flatten()
+    BCLog.d("MD: series S${season}E${episode} → ${results.size} mirrors")
+    results
 }
 
 /** mdrive.lol/archive/NNN page — extract EP + HubCloud/GDFlix links. */
@@ -237,12 +233,10 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
     for (i in allH5.indices) {
         val h = allH5[i]
         val txt = h.text()
-        // Check if this is an EP header like "EP01 – 1080p [1.38 GB]"
         val epMatch = Regex("""EP\s*0*(\d+)""", RegexOption.IGNORE_CASE).find(txt)
         if (epMatch != null) {
             val epNum = epMatch.groupValues[1].toIntOrNull() ?: 0
             if (targetEp > 0 && epNum != targetEp) continue
-            // Look at next 1-3 siblings for HubCloud / GDFliX links
             for (j in i + 1 until minOf(i + 4, allH5.size)) {
                 val anchors = allH5[j].select("a[href]")
                 for (a in anchors) {
@@ -253,11 +247,9 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
                         href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
                     }
                 }
-                // Stop if we hit the next EP header
                 if (allH5[j].text().contains(Regex("""EP\s*0*\d+""", RegexOption.IGNORE_CASE))) break
             }
         } else {
-            // Not EP — could be a plain hubcloud/gdflix on the page for movies
             val anchors = h.select("a[href]")
             for (a in anchors) {
                 val href = a.attr("href")
@@ -271,6 +263,7 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
     }
     return out
 }
+
 
 // ═══════════════════════════════════════════
 // HDhub4u
