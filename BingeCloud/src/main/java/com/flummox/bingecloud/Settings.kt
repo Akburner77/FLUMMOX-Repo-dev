@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -41,7 +42,6 @@ data class RowSpec(
 
 object Settings {
 
-    // ── Storage keys ──
     const val K_CONCURRENCY = "bingecloud_concurrency"
     const val K_CF_DOMAINS = "bingecloud_cf_domains"
     const val K_CF_COOKIE_PREFIX = "bingecloud_cf_cookie_"
@@ -120,7 +120,6 @@ object Settings {
 
     fun getRowSpecByKey(key: String): RowSpec? = ALL_ROWS.firstOrNull { it.key == key }
 
-    // ── Getters ──
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 15).coerceIn(1, 50)
     fun getCfDomains(): List<String> =
         (getKey<String>(K_CF_DOMAINS) ?: "").split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -147,7 +146,6 @@ object Settings {
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
     fun isRowEnabled(key: String): Boolean = getKey<Boolean>(key) ?: true
 
-    // ── Sky palette ──
     private const val BG = 0xFF0A0D14.toInt()
     private const val SKY_TOP = 0xFF1E3A5F.toInt()
     private const val SKY_MID = 0xFF142238.toInt()
@@ -212,7 +210,6 @@ object Settings {
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    // ── Shooting stars ──
     private class ShootingStarsView(context: Context) : View(context) {
         private data class Star(
             var x: Float, var y: Float, var vx: Float, var vy: Float,
@@ -523,7 +520,6 @@ object Settings {
             }
         }
 
-    // ── Homepage reorder row ──
     private fun makeArrowBtn(
         ctx: Context, symbol: String, enabled: Boolean,
         onClick: () -> Unit
@@ -533,7 +529,7 @@ object Settings {
         setTextColor(if (enabled) ACCENT_STRONG else DISABLED)
         background = arrowButtonBg(ctx)
         gravity = Gravity.CENTER
-        val size = dp(ctx, 34)
+        val size = dp(ctx, 32)
         layoutParams = LinearLayout.LayoutParams(size, size)
             .apply { leftMargin = dp(ctx, 4) }
         isClickable = enabled
@@ -541,61 +537,55 @@ object Settings {
     }
 
     private fun rowReorderItem(
-    ctx: Context, spec: RowSpec, position: Int, total: Int,
-    onToggle: (Boolean) -> Unit,
-    onMoveUp: () -> Unit, onMoveDown: () -> Unit
-): LinearLayout {
-    val row = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        background = bg(ROW, 10, ctx)
-        setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(ctx, 6) }
+        ctx: Context, spec: RowSpec, position: Int, total: Int,
+        onToggle: (Boolean) -> Unit,
+        onMoveUp: () -> Unit, onMoveDown: () -> Unit
+    ): LinearLayout {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = bg(ROW, 10, ctx)
+            setPadding(dp(ctx, 10), dp(ctx, 8), dp(ctx, 10), dp(ctx, 8))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(ctx, 6) }
+        }
+
+        row.addView(TextView(ctx).apply {
+            text = "${position + 1}"
+            setTextColor(SUBTEXT); textSize = 12f
+            gravity = Gravity.CENTER
+            val s = dp(ctx, 24)
+            layoutParams = LinearLayout.LayoutParams(s, s)
+            background = bg(INPUT, 12, ctx)
+        })
+
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { leftMargin = dp(ctx, 8); rightMargin = dp(ctx, 4) }
+        }
+        col.addView(TextView(ctx).apply {
+            text = spec.name; setTextColor(TEXT); textSize = 13f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        col.addView(TextView(ctx).apply {
+            text = spec.sourceLabel; setTextColor(SUBTEXT); textSize = 10f
+            setPadding(0, dp(ctx, 2), 0, 0)
+        })
+        row.addView(col)
+
+        val sw = Switch(ctx)
+        sw.isChecked = isRowEnabled(spec.key)
+        sw.setOnCheckedChangeListener { _: CompoundButton, v: Boolean -> onToggle(v) }
+        row.addView(sw)
+
+        row.addView(makeArrowBtn(ctx, "▲", position > 0) { onMoveUp() })
+        row.addView(makeArrowBtn(ctx, "▼", position < total - 1) { onMoveDown() })
+        return row
     }
 
-    // Position number
-    row.addView(TextView(ctx).apply {
-        text = "${position + 1}"
-        setTextColor(SUBTEXT); textSize = 12f
-        gravity = Gravity.CENTER
-        val s = dp(ctx, 26)
-        layoutParams = LinearLayout.LayoutParams(s, s)
-        background = bg(INPUT, 12, ctx)
-    })
-
-    // Label + source
-    val col = LinearLayout(ctx).apply {
-        orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            .apply { leftMargin = dp(ctx, 8); rightMargin = dp(ctx, 4) }
-    }
-    col.addView(TextView(ctx).apply {
-        text = spec.name; setTextColor(TEXT); textSize = 13f
-        maxLines = 1
-        ellipsize = android.text.TextUtils.TruncateAt.END
-    })
-    col.addView(TextView(ctx).apply {
-        text = spec.sourceLabel; setTextColor(SUBTEXT); textSize = 10f
-        setPadding(0, dp(ctx, 2), 0, 0)
-    })
-    row.addView(col)
-
-    // Toggle switch
-    val sw = Switch(ctx).apply {
-        isChecked = Settings.isRowEnabled(spec.key)
-        setOnCheckedChangeListener { _: CompoundButton, v: Boolean -> onToggle(v) }
-    }
-    row.addView(sw)
-
-    // Arrows
-    row.addView(makeArrowBtn(ctx, "▲", position > 0) { onMoveUp() })
-    row.addView(makeArrowBtn(ctx, "▼", position < total - 1) { onMoveDown() })
-    return row
-    }
-
-    // ── Main dialog ──
     fun showSettingsDialog(ctx: Context, onSaved: () -> Unit) {
         lateinit var dialog: AlertDialog
 
@@ -604,7 +594,6 @@ object Settings {
             background = bg(BG, 0, ctx)
         }
 
-        // Sky header
         run {
             val headerFrame = FrameLayout(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -648,7 +637,6 @@ object Settings {
         }
         scroll.addView(body)
 
-        // 1. Performance
         run {
             val c = buildCard(ctx, "⚡", "Performance", "Control scraping speed")
             c.body.addView(stepperRow(
@@ -658,7 +646,6 @@ object Settings {
             body.addView(c.root)
         }
 
-        // 2. Cloudflare
         run {
             val saved = getCfDomains()
             val c = buildCard(
@@ -700,7 +687,6 @@ object Settings {
             body.addView(c.root)
         }
 
-        // 3. FebBox
         run {
             val has = getFebBoxToken().isNotBlank()
             val c = buildCard(
@@ -740,7 +726,6 @@ object Settings {
             body.addView(c.root)
         }
 
-        // 4. Sources
         run {
             val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcFebBox()).count { it }
             val c = buildCard(
@@ -754,7 +739,6 @@ object Settings {
             body.addView(c.root)
         }
 
-        // 5. Quality
         run {
             val cur = getQualityPref()
             val c = buildCard(ctx, "🎞️", "Preferred Quality", "Current: $cur")
@@ -779,7 +763,6 @@ object Settings {
             body.addView(c.root)
         }
 
-        // 6. Pre-filter
         run {
             val c = buildCard(ctx, "🧪", "Link Validation", "Pre-filter dead links")
             c.body.addView(toggleRow(
@@ -790,57 +773,52 @@ object Settings {
             body.addView(c.root)
         }
 
-        // 7. Homepage — reorderable
         run {
             val c = buildCard(
                 ctx, "🏠", "Homepage", "Tap ▲▼ to reorder sections"
             )
-
             val listHolder = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
             }
-
             fun renderList() {
                 listHolder.removeAllViews()
                 val order = getRowOrder()
                 val total = order.size
                 val on = order.count { isRowEnabled(it) }
-
                 c.statusBadge.text = "$on/$total"
                 c.statusBadge.visibility = View.VISIBLE
 
                 for ((idx, key) in order.withIndex()) {
-    val spec = getRowSpecByKey(key) ?: continue
-    listHolder.addView(rowReorderItem(
-        ctx, spec, idx, total,
-        onToggle = { enabled ->
-            setKey(spec.key, enabled)
-            renderList()
-        },
-        onMoveUp = {
-            val current = getRowOrder().toMutableList()
-            val i = current.indexOf(key)
-            if (i > 0) {
-                current[i] = current[i - 1]
-                current[i - 1] = key
-                setRowOrder(current)
-                renderList()
-            }
-        },
-        onMoveDown = {
-            val current = getRowOrder().toMutableList()
-            val i = current.indexOf(key)
-            if (i >= 0 && i < current.size - 1) {
-                current[i] = current[i + 1]
-                current[i + 1] = key
-                setRowOrder(current)
-                renderList()
-            }
-        }
-    ))
+                    val spec = getRowSpecByKey(key) ?: continue
+                    listHolder.addView(rowReorderItem(
+                        ctx, spec, idx, total,
+                        onToggle = { enabled ->
+                            setKey(spec.key, enabled)
+                            renderList()
+                        },
+                        onMoveUp = {
+                            val current = getRowOrder().toMutableList()
+                            val i = current.indexOf(key)
+                            if (i > 0) {
+                                current[i] = current[i - 1]
+                                current[i - 1] = key
+                                setRowOrder(current)
+                                renderList()
+                            }
+                        },
+                        onMoveDown = {
+                            val current = getRowOrder().toMutableList()
+                            val i = current.indexOf(key)
+                            if (i >= 0 && i < current.size - 1) {
+                                current[i] = current[i + 1]
+                                current[i + 1] = key
+                                setRowOrder(current)
+                                renderList()
+                            }
+                        }
+                    ))
                 }
             }
-
             renderList()
             c.body.addView(labelBlock(ctx, "Section order",
                 "Position 1 shows first on the home screen."))
@@ -848,7 +826,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // FFooter  run {
+        run {
             val footer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
@@ -873,7 +851,6 @@ object Settings {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
-        // Buttons
         run {
             val bar = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -905,7 +882,6 @@ object Settings {
         dialog.show()
     }
 
-    // ── WebViews ──
     @SuppressLint("SetJavaScriptEnabled")
     private fun openCfWebView(ctx: Context, startUrl: String, domain: String) {
         val dlg = Dialog(ctx)
