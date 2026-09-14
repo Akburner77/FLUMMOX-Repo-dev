@@ -180,30 +180,49 @@ open class BingeCloudProvider : MainAPI() {
         Log.d("BingeCloud", "loadLinks: ${sorted.size} mirrors — concurrency=$concurrency")
 
         val prefilter = Settings.isPrefilterEnabled()
-val sem = Semaphore(concurrency)
-coroutineScope {
-    sorted.map { m ->
-        async {
-            sem.withPermit {
-                try {
-                    val finalUrl = resolveWrapper(m.url)
-                    if (finalUrl == null) {
-                        Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
-                        return@withPermit
+        val sem = Semaphore(concurrency)
+        coroutineScope {
+            sorted.map { m ->
+                async {
+                    sem.withPermit {
+                        try {
+                            // MovieBox URLs are already direct — no wrapper resolution needed
+                            if (m.source == "MB") {
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = "MovieBox",
+                                        name = "MovieBox · ${m.quality}",
+                                        url = m.url,
+                                        type = if (m.url.contains(".m3u8"))
+                                            ExtractorLinkType.M3U8
+                                        else ExtractorLinkType.VIDEO
+                                    ) {
+                                        this.referer = "https://www.febbox.com"
+                                        this.quality = qualityRank(m.quality)
+                                            .takeIf { it > 0 } ?: Qualities.Unknown.value
+                                    }
+                                )
+                                return@withPermit
+                            }
+
+                            val finalUrl = resolveWrapper(m.url)
+                            if (finalUrl == null) {
+                                Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
+                                return@withPermit
+                            }
+                            if (prefilter && !isHubcloudAlive(finalUrl)) {
+                                Log.d("BingeCloud", "prefilter dropped: ${m.mirror} $finalUrl")
+                                return@withPermit
+                            }
+                            VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                        } catch (e: Exception) {
+                            Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
+                        }
                     }
-                    if (prefilter && !isHubcloudAlive(finalUrl)) {
-                        Log.d("BingeCloud", "prefilter dropped: ${m.mirror} $finalUrl")
-                        return@withPermit
-                    }
-                    VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
-                } catch (e: Exception) {
-                    Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
                 }
-            }
+            }.awaitAll()
         }
-    }.awaitAll()
-}
-return true
+        return true
     }
 
     private fun qualityRank(q: String): Int = when {
