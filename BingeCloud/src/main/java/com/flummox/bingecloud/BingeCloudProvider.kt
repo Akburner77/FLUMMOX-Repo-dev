@@ -189,18 +189,22 @@ open class BingeCloudProvider : MainAPI() {
                     sem.withPermit {
                         try {
                             if (m.source == "MB") {
+                                val linkType = when {
+                                    m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                    m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                    else -> ExtractorLinkType.VIDEO
+                                }
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "MovieBox",
                                         name = "MovieBox · ${m.quality}",
                                         url = m.url,
-                                        type = if (m.url.contains(".m3u8"))
-                                            ExtractorLinkType.M3U8
-                                        else ExtractorLinkType.VIDEO
+                                        type = linkType
                                     ) {
                                         this.referer = "https://www.febbox.com"
                                         this.quality = qualityRank(m.quality)
                                             .takeIf { it > 0 } ?: Qualities.Unknown.value
+                                        if (m.headers != null) this.headers = m.headers
                                     }
                                 )
                                 return@withPermit
