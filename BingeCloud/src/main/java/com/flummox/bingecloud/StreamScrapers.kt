@@ -2,7 +2,6 @@ package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.api.Log
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -32,6 +31,7 @@ private suspend fun resolveDomain(key: String, fallback: String): String {
         val live = JSONObject(json).optString(key).trim()
         if (live.startsWith("http")) live else fallback
     } catch (e: Exception) {
+        BCLog.e("resolveDomain($key): ${e.message}")
         fallback
     }
 }
@@ -54,7 +54,7 @@ private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
     return try {
         app.get(url).document
     } catch (e: Exception) {
-        Log.e("BingeCloud", "HTTP failed $url: ${e.message}")
+        BCLog.e("GET failed $url: ${e.message}")
         null
     }
 }
@@ -64,9 +64,13 @@ private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
 // ─────────────────────────────────────────
 private suspend fun vegamoviesFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("vegamovies", "https://vegamovies.mq")
+    BCLog.d("VM: searching '$title' on $domain")
     return try {
         val json = app.get("$domain/search.php?q=${URLEncoder.encode(title, "UTF-8")}").text
-        val hits = JSONObject(json).optJSONArray("hits") ?: return null
+        val hits = JSONObject(json).optJSONArray("hits") ?: run {
+            BCLog.e("VM: no 'hits' in search response")
+            return null
+        }
         var bestPath: String? = null
         var bestScore = 0
         for (i in 0 until hits.length()) {
@@ -82,9 +86,11 @@ private suspend fun vegamoviesFindPage(title: String, year: String, type: String
             if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
             if (score > bestScore) { bestScore = score; bestPath = permalink }
         }
+        if (bestPath != null) BCLog.d("VM: matched ${bestPath} (score=$bestScore)")
+        else BCLog.d("VM: no title match out of ${hits.length()} hits")
         bestPath?.let { if (it.startsWith("http")) it else "$domain$it" }
     } catch (e: Exception) {
-        Log.e("BingeCloud", "VM search failed: ${e.message}")
+        BCLog.e("VM search failed: ${e.message}")
         null
     }
 }
@@ -105,6 +111,7 @@ private suspend fun vegamoviesExtractMovieRaw(pageUrl: String): List<ScrapedMirr
             ?: continue
         out.add(ScrapedMirror(q, "Vega", dl.attr("href"), "VM"))
     }
+    BCLog.d("VM: extracted ${out.size} mirrors")
     return out
 }
 
@@ -119,12 +126,16 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
     val target = headers.firstOrNull {
         Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
             .find(it.text())?.groupValues?.getOrNull(1)?.toIntOrNull() == season
-    } ?: return out
+    } ?: run {
+        BCLog.e("VM: no season $season header found")
+        return out
+    }
     val q = Regex("""(\d{3,4}[pP])""").find(target.text())?.value ?: "Unknown"
     val nextEl = target.nextElementSibling()
     val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else target.select("a")
     val dl = links.firstOrNull { it.text().contains("Download", true) } ?: return out
     out.add(ScrapedMirror(q, "Vega", dl.attr("href"), "VM"))
+    BCLog.d("VM: series S${season}E${episode} -> ${out.size} mirrors")
     return out
 }
 
@@ -133,10 +144,15 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
 // ─────────────────────────────────────────
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
+    BCLog.d("MD: searching '$title' on $domain")
     return try {
         val html = app.get("$domain/?s=${URLEncoder.encode(title, "UTF-8")}").text
         val doc = Jsoup.parse(html)
         val cards = doc.select("#moviesGridMain > a")
+        BCLog.d("MD: ${cards.size} result cards")
+        if (cards.isEmpty()) {
+            BCLog.e("MD: selector '#moviesGridMain > a' returned 0 (site markup may have changed)")
+        }
         var bestUrl: String? = null
         var bestScore = 0
         for (a in cards) {
@@ -151,9 +167,11 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
             if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
             if (score > bestScore) { bestScore = score; bestUrl = href }
         }
+        if (bestUrl != null) BCLog.d("MD: matched $bestUrl (score=$bestScore)")
+        else BCLog.d("MD: no title match")
         bestUrl
     } catch (e: Exception) {
-        Log.e("BingeCloud", "MD search failed: ${e.message}")
+        BCLog.e("MD search failed: ${e.message}")
         null
     }
 }
@@ -165,6 +183,7 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
         val txt = it.text()
         txt.contains(Regex("""\d{3,4}[pP]""")) && !txt.contains("Zip", true)
     }
+    BCLog.d("MD: found ${headers.size} quality headers on movie page")
     for (h in headers) {
         val q = Regex("""(\d{3,4}[pP])""").find(h.text())?.value ?: continue
         var cursor = h.nextElementSibling()
@@ -172,6 +191,7 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
         while (cursor != null && steps < 4) {
             val link = cursor.selectFirst("a[href*='archive']")
                 ?: cursor.selectFirst("a[href*='mdrive']")
+                ?: cursor.selectFirst("a[href]")
             if (link != null && link.attr("href").isNotEmpty()) {
                 out.add(ScrapedMirror(q, "MoviesDrive", link.attr("href"), "MD"))
                 break
@@ -182,6 +202,7 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
             steps++
         }
     }
+    BCLog.d("MD: extracted ${out.size} mirrors")
     return out
 }
 
@@ -210,6 +231,7 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
             j++
         }
     }
+    BCLog.d("MD: series S${season}E${episode} -> ${out.size} mirrors")
     return out
 }
 
@@ -218,10 +240,12 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
 // ─────────────────────────────────────────
 private suspend fun hdhub4uFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
+    BCLog.d("HDH: searching '$title' on $domain")
     return try {
         val html = app.get("$domain/?s=${URLEncoder.encode(title, "UTF-8")}").text
         val doc = Jsoup.parse(html)
         val cards = doc.select("li.thumb")
+        BCLog.d("HDH: ${cards.size} result cards")
         var bestUrl: String? = null
         var bestScore = 0
         for (card in cards) {
@@ -236,9 +260,11 @@ private suspend fun hdhub4uFindPage(title: String, year: String, type: String): 
             if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
             if (score > bestScore) { bestScore = score; bestUrl = href }
         }
+        if (bestUrl != null) BCLog.d("HDH: matched $bestUrl (score=$bestScore)")
+        else BCLog.d("HDH: no title match")
         bestUrl
     } catch (e: Exception) {
-        Log.e("BingeCloud", "HDH search failed: ${e.message}")
+        BCLog.e("HDH search failed: ${e.message}")
         null
     }
 }
@@ -270,6 +296,7 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
 
         out.add(ScrapedMirror(q, "HDhub4u", href, "HDH"))
     }
+    BCLog.d("HDH: extracted ${out.size} mirrors")
     return out
 }
 
@@ -278,9 +305,10 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
 // ─────────────────────────────────────────
 private suspend fun movieboxFindSubject(title: String, year: String, type: String): MBSubject? {
     val results = try { mbSearch(title) } catch (e: Exception) {
-        Log.e("BingeCloud", "MB search failed: ${e.message}")
+        BCLog.e("MB search failed: ${e.message}")
         return null
     }
+    BCLog.d("MB: search returned ${results.size} results")
     if (results.isEmpty()) return null
 
     val expectedType = if (type == "series") 2 else 1
@@ -293,19 +321,20 @@ private suspend fun movieboxFindSubject(title: String, year: String, type: Strin
         if (s.type == expectedType) score += 2
         if (score > bestScore) { bestScore = score; best = s }
     }
+    if (best != null) BCLog.d("MB: matched '${best.title}' (${best.year}) id=${best.subjectId}")
+    else BCLog.d("MB: no title match")
     return best
 }
 
 private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val subject = movieboxFindSubject(q.title, q.year, q.type) ?: return emptyList()
-    Log.d("BingeCloud", "MB matched: ${subject.title} (${subject.year}) id=${subject.subjectId}")
     val streams = try {
         mbPlay(subject.subjectId, q.season, q.episode)
     } catch (e: Exception) {
-        Log.e("BingeCloud", "MB play failed: ${e.message}")
+        BCLog.e("MB play failed: ${e.message}")
         emptyList()
     }
-    Log.d("BingeCloud", "MB streams: ${streams.size}")
+    BCLog.d("MB: play returned ${streams.size} streams")
     return streams.map { s ->
         ScrapedMirror(
             quality = s.quality.ifBlank { "Auto" },
@@ -327,7 +356,7 @@ suspend fun resolveWrapper(url: String): String? {
 
     val doc = cloudflareGetDoc(url)
     if (doc == null) {
-        Log.e("BingeCloud", "resolveWrapper: fetch failed for $url")
+        BCLog.e("resolveWrapper: fetch failed for $url")
         return null
     }
     doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
@@ -339,6 +368,7 @@ suspend fun resolveWrapper(url: String): String? {
 // Entry
 // ─────────────────────────────────────────
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
+    BCLog.section("scrapeAllSources: ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
     return coroutineScope {
         val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<ScrapedMirror>>>()
 
@@ -349,7 +379,7 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                     if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
                     else vegamoviesExtractMovieRaw(page)
                 } catch (e: Exception) {
-                    Log.e("BingeCloud", "VM task failed: ${e.message}"); emptyList()
+                    BCLog.e("VM task failed: ${e.message}"); emptyList()
                 }
             })
         }
@@ -360,7 +390,7 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                     if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
                     else moviesdriveExtractMovieRaw(page)
                 } catch (e: Exception) {
-                    Log.e("BingeCloud", "MD task failed: ${e.message}"); emptyList()
+                    BCLog.e("MD task failed: ${e.message}"); emptyList()
                 }
             })
         }
@@ -370,7 +400,7 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                     val page = hdhub4uFindPage(q.title, q.year, q.type) ?: return@async emptyList()
                     hdhub4uExtractRaw(page)
                 } catch (e: Exception) {
-                    Log.e("BingeCloud", "HDH task failed: ${e.message}"); emptyList()
+                    BCLog.e("HDH task failed: ${e.message}"); emptyList()
                 }
             })
         }
@@ -379,13 +409,22 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                 try {
                     movieboxExtractRaw(q)
                 } catch (e: Exception) {
-                    Log.e("BingeCloud", "MB task failed: ${e.message}"); emptyList()
+                    BCLog.e("MB task failed: ${e.message}"); emptyList()
                 }
             })
         }
 
-        if (jobs.isEmpty()) return@coroutineScope emptyList()
-        jobs.awaitAll().flatten()
+        if (jobs.isEmpty()) {
+            BCLog.d("no sources enabled")
+            return@coroutineScope emptyList()
+        }
+        val all = jobs.awaitAll().flatten()
+        val vm = all.count { it.source == "VM" }
+        val md = all.count { it.source == "MD" }
+        val hdh = all.count { it.source == "HDH" }
+        val mb = all.count { it.source == "MB" }
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb total=${all.size}")
+        all
     }
 }
 
