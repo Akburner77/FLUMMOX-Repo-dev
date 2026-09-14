@@ -2,8 +2,6 @@ package com.flummox.bingecloud
 
 import android.util.Base64
 import com.lagradost.cloudstream3.app
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URI
 import java.net.URLEncoder
@@ -22,7 +20,6 @@ private const val MB_VERSION_CODE = 50020126L
 private const val MB_VERSION_NAME = "4.0.02.0831.03"
 private const val MB_PACKAGE = "com.community.mbox.in"
 private const val MB_UA = "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
-private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
 private val MB_HOSTS = listOf(
     "api6.aoneroom.com",
@@ -32,12 +29,10 @@ private val MB_HOSTS = listOf(
     "api3.aoneroom.com"
 )
 
-private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
-private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
-
+private val mbDeviceIdLock = Any()
 private var mbDeviceId: String? = null
 private fun deviceId(): String {
-    return mbDeviceId ?: synchronized(this) {
+    return mbDeviceId ?: synchronized(mbDeviceIdLock) {
         mbDeviceId ?: run {
             val chars = "0123456789abcdef"
             val sb = StringBuilder(16)
