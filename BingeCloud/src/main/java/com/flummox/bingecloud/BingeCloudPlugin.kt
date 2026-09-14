@@ -19,15 +19,26 @@
 package com.flummox.bingecloud
 
 import android.content.Context
+import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
 class BingeCloudPlugin : Plugin() {
     override fun load(context: Context) {
+        BingeCloudCtx.context = context
+
         registerMainAPI(BingeCloudProvider())
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
         registerExtractorAPI(Filepress())
+
+        this.openSettings = { ctx: Context ->
+            Settings.showSettingsDialog(ctx) {
+                try {
+                    MainActivity.reloadHomeEvent.invoke(true)
+                } catch (_: Exception) {}
+            }
+        }
     }
 }

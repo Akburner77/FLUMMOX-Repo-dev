@@ -7,6 +7,8 @@ import com.lagradost.api.Log
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.util.Calendar
 
@@ -21,19 +23,17 @@ open class BingeCloudProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
-    private val rows = listOf(
-        Triple("movie", "tmdb.trending", "Trending Movies"),
-        Triple("series", "tmdb.trending", "Trending Series"),
-        Triple("movie", "tmdb.top", "Popular Movies"),
-        Triple("series", "tmdb.top", "Popular Series"),
-        Triple("anime", "mal.top_anime", "Top Anime"),
-        Triple("anime", "mal.airing", "Airing Now"),
-        Triple("anime", "mal.top_movies", "Top Anime Movies"),
-        Triple("anime", "mal.most_popular", "Most Popular Anime")
-    )
-
     override val mainPage = mainPageOf(
-        *rows.map { (type, id, name) -> "$type$ROW_TAG$id$ROW_TAG$name" to name }.toTypedArray()
+        *Settings.getRowOrder()
+            .mapNotNull { key ->
+                val spec = Settings.getRowSpecByKey(key) ?: return@mapNotNull null
+                if (!Settings.isRowEnabled(key)) return@mapNotNull null
+                val id = if (spec.defaultGenre != null)
+                    "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
+                else spec.catalogId
+                "${spec.type}$ROW_TAG$id$ROW_TAG${spec.name}" to spec.name
+            }
+            .toTypedArray()
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
@@ -41,8 +41,9 @@ open class BingeCloudProvider : MainAPI() {
         if (parts.size < 2) return null
         val type = parts[0]
         val catalogId = parts[1]
+        val genre = parts.getOrNull(2)
         val skip = (page - 1) * 25
-        val metas = aioFetchCatalog(type, catalogId, null, skip)
+        val metas = aioFetchCatalog(type, catalogId, genre, skip)
         val items = metas.mapNotNull { it.toSearchResponse() }
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
@@ -96,7 +97,6 @@ open class BingeCloudProvider : MainAPI() {
         } ?: emptyList()
 
         val videos = meta.videos ?: emptyList()
-
         val statusTag = computeStatusTag(meta, videos, tvType)
         val desc = meta.description ?: ""
         val plotWithStatus = if (statusTag.isNotBlank() && desc.isNotBlank())
@@ -169,30 +169,46 @@ open class BingeCloudProvider : MainAPI() {
             return false
         }
 
-        val sorted = mirrors.sortedByDescending { qualityRank(it.quality) }
-        Log.d("BingeCloud", "loadLinks: ${sorted.size} raw mirrors — resolving in parallel")
+        val pref = Settings.getQualityPref()
+        val prefRank = qualityRank(pref)
+        val sorted = mirrors.sortedWith(
+            compareByDescending<ScrapedMirror> {
+                if (prefRank > 0 && qualityRank(it.quality) == prefRank) 1 else 0
+            }.thenByDescending { qualityRank(it.quality) }
+        )
+        val concurrency = Settings.getConcurrency().coerceIn(1, 50)
+        Log.d("BingeCloud", "loadLinks: ${sorted.size} mirrors — concurrency=$concurrency")
 
-        coroutineScope {
-            sorted.map { m ->
-                async {
-                    try {
-                        val finalUrl = resolveWrapper(m.url)
-                        if (finalUrl != null) {
-                            VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
-                        } else {
-                            Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
-                        }
-                    } catch (e: Exception) {
-                        Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
+        val prefilter = Settings.isPrefilterEnabled()
+val sem = Semaphore(concurrency)
+coroutineScope {
+    sorted.map { m ->
+        async {
+            sem.withPermit {
+                try {
+                    val finalUrl = resolveWrapper(m.url)
+                    if (finalUrl == null) {
+                        Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
+                        return@withPermit
                     }
+                    if (prefilter && !isHubcloudAlive(finalUrl)) {
+                        Log.d("BingeCloud", "prefilter dropped: ${m.mirror} $finalUrl")
+                        return@withPermit
+                    }
+                    VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
                 }
-            }.awaitAll()
+            }
         }
-        return true
+    }.awaitAll()
+}
+return true
     }
 
     private fun qualityRank(q: String): Int = when {
         q.contains("2160", true) || q.contains("4k", true) -> 2160
+        q.contains("1440", true) || q.contains("2k", true) -> 1440
         q.contains("1080", true) -> 1080
         q.contains("720", true) -> 720
         q.contains("480", true) -> 480
