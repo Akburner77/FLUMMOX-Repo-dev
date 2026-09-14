@@ -102,105 +102,53 @@ open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
     }
 
     override suspend fun getUrl(
-        url: String,
-        referer: String?,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        var baseUrl = getBaseUrl(url)
-        val latestBaseUrl = if (url.contains("hubcloud")) {
-            getLatestBaseUrl(baseUrl, "hubcloud")
-        } else {
-            getLatestBaseUrl(baseUrl, "vcloud")
-        }
+    url: String,
+    referer: String?,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+) {
+    val doc = cloudflareGetDoc(url) ?: return
 
-        var newUrl = url
-        if (baseUrl != latestBaseUrl) {
-            newUrl = url.replace(baseUrl, latestBaseUrl)
-            baseUrl = latestBaseUrl
-        }
+    val gamerxyt = doc.selectFirst("script:containsData(hubcloud.php)")?.toString()
+        ?.let { Regex("""var\s+url\s*=\s*['"](https?://[^'"]+)['"]""").find(it)?.groupValues?.get(1) }
 
-        val doc = cloudflareGetDoc(newUrl) ?: return
-        var link = if (newUrl.contains("/video/")) {
-            doc.selectFirst("div.vd > center > a")?.attr("href") ?: ""
-        } else {
-            val scriptTag = doc.selectFirst("script:containsData(url)")?.toString() ?: ""
-            if (newUrl.contains("vcloud")) {
-                extractDoubleAtob(scriptTag) ?: ""
-            } else {
-                Regex("var url = '([^']*)'").find(scriptTag)?.groupValues?.get(1) ?: ""
-            }
-        }
-
-        if (!link.startsWith("https://")) link = baseUrl + link
-
-        val document = cloudflareGetDoc(link) ?: return
-        val header = document.select("div.card-header").text()
-        val quality = getIndexQuality(header)
-        val qualityText = Regex("""(\d{3,4}[pP])""").find(header)?.value ?: "${quality}p"
-
-        suspend fun myCallback(link: String, server: String = "") {
-            val serverClean = server.trim('[', ']').trim()
-                .replace(Regex("""\b\d{3,4}[pP]\b"""), "")
-                .replace(Regex("""\s+"""), " ")
-                .trim()
-            val label = buildString {
-                append(qualityText)
-                if (sourceTag.isNotBlank()) {
-                    append(" · ")
-                    append(sourceTag)
-                }
-                if (serverClean.isNotBlank()) {
-                    append(" · ")
-                    append(serverClean)
-                }
-            }
-
-            callback.invoke(
-                newExtractorLink(
-                    source = name,
-                    name = label,
-                    url = link,
-                    type = ExtractorLinkType.VIDEO
-                ) {
-                    this.quality = quality
-                }
-            )
-        }
-
-        document.select("h2 a.btn").amap {
-            val href = it.attr("href")
-            val text = it.text()
-            when {
-                text.contains("FSL Server") -> myCallback(href, "[FSL Server]")
-                text.contains("FSLv2") -> myCallback(href, "[FSLv2 Server]")
-                text.contains("Mega Server") -> myCallback(href, "[Mega Server]")
-                text.contains("Download File") -> myCallback(href)
-                text.contains("BuzzServer") -> {
-                    val dlink = app.get("$href/download", referer = href, allowRedirects = false)
-                        .headers["hx-redirect"] ?: ""
-                    val bUrl = getBaseUrl(href)
-                    if (dlink != "") myCallback(bUrl + dlink, "[BuzzServer]")
-                }
-                href.contains("pixeldra") -> {
-                    val pixelLink = extractPxlUrl(document.toString()) ?: return@amap
-                    val baseUrlLink = getBaseUrl(pixelLink)
-                    val finalURL = if (pixelLink.contains("download", true)) {
-                        pixelLink
-                    } else {
-                        "$baseUrlLink/api/file/${pixelLink.substringAfterLast("/")}?download"
+    if (gamerxyt != null && !gamerxyt.contains(".m3u8")) {
+        val finalDoc = cloudflareGetDoc(gamerxyt) ?: return
+        val finalAnchors = finalDoc.select("a[href].btn, a[href][id]")
+        for (a in finalAnchors) {
+            val href = a.attr("href")
+            if (href.startsWith("http") &&
+                (href.contains("cloudflarestorage", true) || href.contains("r2.dev", true) ||
+                 href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
+                 href.contains("busycdn", true) || href.contains("video-downloads", true))) {
+                val label = a.text().ifBlank { "HubCloud" }.trim()
+                callback.invoke(
+                    newExtractorLink(
+                        source = name,
+                        name = label,
+                        url = href,
+                        type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    ) {
+                        this.referer = "https://hubcloud.ist/"
+                        this.quality = Qualities.Unknown.value
                     }
-                    myCallback(finalURL, "[Pixeldrain]")
-                }
-                text.contains("Server : 10Gbps") -> {
-                    var redirectUrl = resolveFinalUrl(href) ?: return@amap
-                    if (redirectUrl.contains("link=")) redirectUrl = redirectUrl.substringAfter("link=")
-                    myCallback(redirectUrl, "[Download]")
-                }
-                text.contains("Gofile") -> loadExtractor(href, "", subtitleCallback, callback)
-                else -> Log.d("BingeCloud", "V-Cloud: no server matched for: $text")
+                )
             }
         }
+        return
+    }
+
+    val scriptTag = doc.selectFirst("script:containsData(url)")?.toString() ?: ""
+    val link = if (url.contains("vcloud", true)) extractDoubleAtob(scriptTag) ?: ""
+        else Regex("var url = '([^']*)'").find(scriptTag)?.groupValues?.get(1) ?: ""
+    if (link.isEmpty()) return
+    val resolved = if (!link.startsWith("http")) getBaseUrl(url) + link else link
+    callback.invoke(
+        newExtractorLink(source = name, name = name, url = resolved, type = ExtractorLinkType.VIDEO) {
+            this.referer = url
+            this.quality = Qualities.Unknown.value
+        }
+    )
     }
 }
 
