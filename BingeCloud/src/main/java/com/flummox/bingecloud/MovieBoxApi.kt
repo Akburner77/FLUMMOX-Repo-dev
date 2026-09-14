@@ -3,6 +3,8 @@ package com.flummox.bingecloud
 import android.util.Base64
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.app
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -16,6 +18,7 @@ import kotlin.random.Random
 private const val MB_SECRET = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
 private const val MB_APP_VERSION = "50020117"
 private const val MB_UA_SUFFIX = "Cronet/135.0.7012.3"
+private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
 private val MB_HOSTS = listOf(
     "api6.aoneroom.com",
@@ -152,7 +155,7 @@ private suspend fun mbLogin(): String? {
             val res = app.post(
                 url = "https://$host$path",
                 headers = headers,
-                json = JSONObject(body)
+                requestBody = body.toRequestBody(JSON_MEDIA)
             )
             Log.d("BingeCloud-MB", "login $host -> ${res.code}")
             if (res.code in 200..299) {
@@ -194,16 +197,12 @@ private suspend fun mbGet(
     }
     for (host in MB_HOSTS.shuffled()) {
         try {
-            val headers = buildSignedHeaders("POST", path, query, body, session)
+            val headers = buildSignedHeaders("GET", path, query, "", session)
             val url = if (query.isNullOrBlank())
                 "https://$host$path"
             else
                 "https://$host$path?$query"
-            val res = app.post(
-                url = url,
-                headers = headers,
-                json = JSONObject(body)
-            )
+            val res = app.get(url, headers = headers)
             Log.d("BingeCloud-MB", "GET $host$path -> ${res.code}")
             if (res.code in 200..299) {
                 return try { JSONObject(res.text) } catch (_: Exception) { null }
@@ -237,7 +236,11 @@ private suspend fun mbPost(
                 "https://$host$path"
             else
                 "https://$host$path?$query"
-            val res = app.post(url, headers = headers, data = body)
+            val res = app.post(
+                url = url,
+                headers = headers,
+                requestBody = body.toRequestBody(JSON_MEDIA)
+            )
             Log.d("BingeCloud-MB", "POST $host$path -> ${res.code}")
             if (res.code in 200..299) {
                 return try { JSONObject(res.text) } catch (_: Exception) { null }
@@ -260,12 +263,12 @@ data class MBSubject(
     val subjectId: String,
     val title: String,
     val year: Int?,
-    val type: Int          // 1 = movie, 2 = series
+    val type: Int
 )
 
 data class MBStream(
     val url: String,
-    val quality: String,   // "1080p", "720p", etc.
+    val quality: String,
     val size: String?
 )
 
@@ -276,7 +279,6 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     val q = "keyword=${URLEncoder.encode(query, "UTF-8")}&page=$page&perPage=20"
     val json = mbGet("/wefeed-mobile-bff/subject/search", q) ?: return emptyList()
 
-    // Response shape can be { data: { items: [...] } } or { items: [...] }
     val itemsArray = json.optJSONObject("data")?.optJSONArray("items")
         ?: json.optJSONArray("items")
         ?: return emptyList()
@@ -290,15 +292,10 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
             }
         }
         if (id.isBlank()) continue
-        val title = o.optString("title").ifBlank {
-            o.optString("name")
-        }
-        val yearStr = o.optString("releaseDate").ifBlank {
-            o.optString("year")
-        }
+        val title = o.optString("title").ifBlank { o.optString("name") }
+        val yearStr = o.optString("releaseDate").ifBlank { o.optString("year") }
         val year = yearStr.take(4).toIntOrNull()
-        val type = o.optInt("subjectType",
-            o.optInt("type", 1))
+        val type = o.optInt("subjectType", o.optInt("type", 1))
         out.add(MBSubject(id, title, year, type))
     }
     return out
@@ -310,8 +307,7 @@ suspend fun mbDetail(subjectId: String): JSONObject? {
 
 suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
-    val json = mbGet("/wefeed-mobile-bff/subject/play", q)
-        ?: return emptyList()
+    val json = mbGet("/wefeed-mobile-bff/subject/play", q) ?: return emptyList()
 
     val root = json.optJSONObject("data") ?: json
     val streamsArr = root.optJSONArray("streams")
@@ -322,9 +318,7 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<M
     for (i in 0 until streamsArr.length()) {
         val o = streamsArr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank {
-            o.optString("playUrl").ifBlank {
-                o.optString("src")
-            }
+            o.optString("playUrl").ifBlank { o.optString("src") }
         }
         if (url.isBlank()) continue
         val quality = o.optString("quality").ifBlank {
