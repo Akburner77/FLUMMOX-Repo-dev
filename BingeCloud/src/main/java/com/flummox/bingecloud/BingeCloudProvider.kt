@@ -179,26 +179,31 @@ open class BingeCloudProvider : MainAPI() {
         val concurrency = Settings.getConcurrency().coerceIn(1, 50)
         Log.d("BingeCloud", "loadLinks: ${sorted.size} mirrors — concurrency=$concurrency")
 
-        val sem = Semaphore(concurrency)
-        coroutineScope {
-            sorted.map { m ->
-                async {
-                    sem.withPermit {
-                        try {
-                            val finalUrl = resolveWrapper(m.url)
-                            if (finalUrl != null) {
-                                VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
-                            } else {
-                                Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
-                            }
-                        } catch (e: Exception) {
-                            Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
-                        }
+        val prefilter = Settings.isPrefilterEnabled()
+val sem = Semaphore(concurrency)
+coroutineScope {
+    sorted.map { m ->
+        async {
+            sem.withPermit {
+                try {
+                    val finalUrl = resolveWrapper(m.url)
+                    if (finalUrl == null) {
+                        Log.d("BingeCloud", "unresolved: ${m.mirror} ${m.url}")
+                        return@withPermit
                     }
+                    if (prefilter && !isHubcloudAlive(finalUrl)) {
+                        Log.d("BingeCloud", "prefilter dropped: ${m.mirror} $finalUrl")
+                        return@withPermit
+                    }
+                    VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                } catch (e: Exception) {
+                    Log.e("BingeCloud", "${m.mirror} failed: ${e.message}")
                 }
-            }.awaitAll()
+            }
         }
-        return true
+    }.awaitAll()
+}
+return true
     }
 
     private fun qualityRank(q: String): Int = when {
