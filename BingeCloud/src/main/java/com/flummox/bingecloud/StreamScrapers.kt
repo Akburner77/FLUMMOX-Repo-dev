@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
@@ -68,8 +69,7 @@ private suspend fun vegamoviesFindPage(title: String, year: String, type: String
     return try {
         val json = app.get("$domain/search.php?q=${URLEncoder.encode(title, "UTF-8")}").text
         val hits = JSONObject(json).optJSONArray("hits") ?: run {
-            BCLog.e("VM: no 'hits' in search response")
-            return null
+            BCLog.e("VM: no 'hits' in search response"); return null
         }
         var bestPath: String? = null
         var bestScore = 0
@@ -86,12 +86,10 @@ private suspend fun vegamoviesFindPage(title: String, year: String, type: String
             if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
             if (score > bestScore) { bestScore = score; bestPath = permalink }
         }
-        if (bestPath != null) BCLog.d("VM: matched ${bestPath} (score=$bestScore)")
-        else BCLog.d("VM: no title match out of ${hits.length()} hits")
+        if (bestPath != null) BCLog.d("VM: matched ${bestPath}")
         bestPath?.let { if (it.startsWith("http")) it else "$domain$it" }
     } catch (e: Exception) {
-        BCLog.e("VM search failed: ${e.message}")
-        null
+        BCLog.e("VM search failed: ${e.message}"); null
     }
 }
 
@@ -126,137 +124,155 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
     val target = headers.firstOrNull {
         Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
             .find(it.text())?.groupValues?.getOrNull(1)?.toIntOrNull() == season
-    } ?: run {
-        BCLog.e("VM: no season $season header found")
-        return out
-    }
+    } ?: return out
     val q = Regex("""(\d{3,4}[pP])""").find(target.text())?.value ?: "Unknown"
     val nextEl = target.nextElementSibling()
     val links = if (nextEl != null && nextEl.tagName() == "p") nextEl.select("a") else target.select("a")
     val dl = links.firstOrNull { it.text().contains("Download", true) } ?: return out
     out.add(ScrapedMirror(q, "Vega", dl.attr("href"), "VM"))
-    BCLog.d("VM: series S${season}E${episode} -> ${out.size} mirrors")
     return out
 }
 
 // ═══════════════════════════════════════════
-// MoviesDrive — NEW search.html + h5 > a extraction
+// MoviesDrive — WP REST search + h5 > a extraction
 // ═══════════════════════════════════════════
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
-    BCLog.d("MD: searching '$title' via search.html on $domain")
+    BCLog.d("MD: WP REST search '$title' on $domain")
     return try {
-        val html = app.get("$domain/search.html?q=${URLEncoder.encode(title, "UTF-8")}").text
-        val doc = Jsoup.parse(html)
-        val cards = doc.select("#moviesGridMain > a")
-        BCLog.d("MD: ${cards.size} result cards")
-        if (cards.isEmpty()) {
-            BCLog.e("MD: selector '#moviesGridMain > a' returned 0")
+        // WordPress REST API — no JS needed
+        val url = "$domain/wp-json/wp/v2/posts?search=${URLEncoder.encode(title, "UTF-8")}&per_page=20"
+        val json = app.get(url).text
+        val arr = try { JSONArray(json) } catch (e: Exception) {
+            BCLog.e("MD: REST parse failed"); return null
         }
+        BCLog.d("MD: REST returned ${arr.length()} posts")
         var bestUrl: String? = null
         var bestScore = 0
-        for (a in cards) {
-            val alt = a.selectFirst("p.poster-title")?.text()
-                ?: a.selectFirst("img")?.attr("alt") ?: continue
-            val href = a.attr("href")
-            if (href.isEmpty() || !titleMatches(title, alt)) continue
+        for (i in 0 until arr.length()) {
+            val post = arr.optJSONObject(i) ?: continue
+            val rendered = post.optJSONObject("title")?.optString("rendered") ?: continue
+            val postTitle = Jsoup.parse(rendered).text()
+            val link = post.optString("link")
+            if (link.isEmpty()) continue
+            if (!titleMatches(title, postTitle)) continue
             var score = 1
-            if (year.isNotBlank() && alt.contains(year)) score += 2
-            val lower = alt.lowercase()
+            if (year.isNotBlank() && postTitle.contains(year)) score += 2
+            val lower = postTitle.lowercase()
             if (type == "series" && (lower.contains("season") || lower.contains("series"))) score += 2
-            if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
-            if (score > bestScore) { bestScore = score; bestUrl = href }
+            if (type == "movie" && (lower.contains("full movie") || !lower.contains("season"))) score += 1
+            if (score > bestScore) { bestScore = score; bestUrl = link }
         }
-        if (bestUrl != null) BCLog.d("MD: matched $bestUrl (score=$bestScore)")
+        if (bestUrl != null) BCLog.d("MD: matched $bestUrl")
         else BCLog.d("MD: no title match")
-        bestUrl?.let { if (it.startsWith("http")) it else "$domain$it" }
+        bestUrl
     } catch (e: Exception) {
-        BCLog.e("MD search failed: ${e.message}")
-        null
+        BCLog.e("MD search failed: ${e.message}"); null
     }
 }
 
-/** Movie extraction — follow each "Download" button, parse intermediate page for hubcloud/gdflix/gdlink */
+/** Movie extraction — detail page has h5 > a pointing to mdrive.lol/archive/NNN. */
 private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(pageUrl) ?: return out
-    val buttons = doc.select("h5 > a")
-    BCLog.d("MD: ${buttons.size} download buttons on movie page")
-    for (button in buttons) {
-        val href = button.attr("href")
-        if (href.isEmpty()) continue
-        val parentText = button.parent()?.text() ?: button.text()
-        val q = Regex("""(\d{3,4}[pP])""").find(parentText)?.value ?: "Unknown"
-        val intermediateDoc = safeGet(href) ?: continue
-        val innerLinks = intermediateDoc.select("a").filter {
-            val h = it.attr("href")
-            h.contains("hubcloud", true) || h.contains("gdflix", true) || h.contains("gdlink", true)
-        }
-        BCLog.d("MD: q=$q intermediate ${href.take(60)} -> ${innerLinks.size} inner links")
-        for (link in innerLinks) {
-            val source = link.attr("href")
-            if (source.isEmpty()) continue
-            out.add(ScrapedMirror(q, "MoviesDrive", source, "MD"))
+
+    // Walk each h5, look at next sibling h5 for the archive link
+    val allH5 = doc.select("h5")
+    for (i in allH5.indices) {
+        val h = allH5[i]
+        val txt = h.text()
+        val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
+        // Look at next 1-3 siblings for mdrive.lol/archive link
+        for (j in i + 1 until minOf(i + 4, allH5.size)) {
+            val anchor = allH5[j].selectFirst("a[href*='mdrive.lol/archive/'], a[href*='moviesdrives']")
+                ?: allH5[j].selectFirst("a[href*='archive']")
+                ?: continue
+            val archiveUrl = anchor.attr("href")
+            if (archiveUrl.isEmpty()) continue
+            BCLog.d("MD: quality $q → $archiveUrl")
+            val inner = extractFromArchivePage(archiveUrl, q)
+            out.addAll(inner)
+            break
         }
     }
     BCLog.d("MD: extracted ${out.size} mirrors")
     return out
 }
 
-/** Series extraction — walk "h5 > a" buttons, follow episode page, parse episode spans */
+/** Series extraction — same detail structure, filter by season if labeled. */
 private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(pageUrl) ?: return out
-    val buttons = doc.select("h5 > a").filter { !it.text().contains("Zip", true) }
-    BCLog.d("MD: ${buttons.size} season/series buttons")
 
-    for (button in buttons) {
-        val titleElement = button.parent()?.previousElementSibling()
-        val mainTitle = titleElement?.text() ?: button.parent()?.text() ?: ""
-        val realSeason = Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
-            .find(mainTitle)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-        if (realSeason != season) continue
-
-        val episodePageUrl = button.attr("href")
-        if (episodePageUrl.isEmpty()) continue
-        val epDoc = safeGet(episodePageUrl) ?: continue
-
-        var elements = epDoc.select("span:matches((?i)(Ep))")
-        if (elements.isEmpty()) {
-            elements = epDoc.select("a:matches((?i)(HubCloud|GDFlix))")
+    val allH5 = doc.select("h5")
+    for (i in allH5.indices) {
+        val h = allH5[i]
+        val txt = h.text()
+        val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
+        // If text mentions a season and it's not ours, skip
+        val sMatch = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(txt)
+        if (sMatch != null) {
+            val s = sMatch.groupValues[1].toIntOrNull() ?: 0
+            if (s != season) continue
         }
-        BCLog.d("MD: S$season episode page -> ${elements.size} elements")
+        // Skip "Zip" links
+        if (txt.contains("Zip", true)) continue
+        for (j in i + 1 until minOf(i + 4, allH5.size)) {
+            val anchor = allH5[j].selectFirst("a[href*='mdrive.lol/archive/']")
+                ?: allH5[j].selectFirst("a[href*='archive']")
+                ?: continue
+            val archiveUrl = anchor.attr("href")
+            if (archiveUrl.isEmpty()) continue
+            BCLog.d("MD: S$season q=$q → $archiveUrl")
+            val inner = extractFromArchivePage(archiveUrl, q, episode)
+            out.addAll(inner)
+            break
+        }
+    }
+    BCLog.d("MD: series S${season}E${episode} → ${out.size} mirrors")
+    return out
+}
 
-        var currentEp = 1
-        for (el in elements) {
-            if (el.tagName() == "span") {
-                currentEp = Regex("""Ep\s*0*(\d+)""", RegexOption.IGNORE_CASE)
-                    .find(el.toString())?.groupValues?.getOrNull(1)?.toIntOrNull() ?: currentEp
-                var sibling = el.parent()?.nextElementSibling()
-                while (sibling != null) {
-                    val txt = sibling.text()
-                    if (txt.contains("HubCloud", true) || txt.contains("gdflix", true) || txt.contains("gdlink", true)) {
-                        val aTag = sibling.selectFirst("a")
-                        val epUrl = aTag?.attr("href") ?: ""
-                        if (epUrl.isNotEmpty() && currentEp == episode) {
-                            val q = Regex("""(\d{3,4}[pP])""").find(mainTitle)?.value ?: "Unknown"
-                            out.add(ScrapedMirror(q, "MoviesDrive", epUrl, "MD"))
-                        }
-                        sibling = sibling.nextElementSibling()
-                    } else break
+/** mdrive.lol/archive/NNN page — extract EP + HubCloud/GDFlix links. */
+private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, targetEp: Int = 0): List<ScrapedMirror> {
+    val out = mutableListOf<ScrapedMirror>()
+    val doc = safeGet(archiveUrl) ?: return out
+    val allH5 = doc.select("h5")
+    for (i in allH5.indices) {
+        val h = allH5[i]
+        val txt = h.text()
+        // Check if this is an EP header like "EP01 – 1080p [1.38 GB]"
+        val epMatch = Regex("""EP\s*0*(\d+)""", RegexOption.IGNORE_CASE).find(txt)
+        if (epMatch != null) {
+            val epNum = epMatch.groupValues[1].toIntOrNull() ?: 0
+            if (targetEp > 0 && epNum != targetEp) continue
+            // Look at next 1-3 siblings for HubCloud / GDFliX links
+            for (j in i + 1 until minOf(i + 4, allH5.size)) {
+                val anchors = allH5[j].select("a[href]")
+                for (a in anchors) {
+                    val href = a.attr("href")
+                    val label = a.text().lowercase()
+                    when {
+                        href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HubCloud", href, "MD"))
+                        href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
+                    }
                 }
-                currentEp++
-            } else {
-                val epUrl = el.attr("href")
-                if (epUrl.isNotEmpty() && currentEp == episode) {
-                    val q = Regex("""(\d{3,4}[pP])""").find(mainTitle)?.value ?: "Unknown"
-                    out.add(ScrapedMirror(q, "MoviesDrive", epUrl, "MD"))
+                // Stop if we hit the next EP header
+                if (allH5[j].text().contains(Regex("""EP\s*0*\d+""", RegexOption.IGNORE_CASE))) break
+            }
+        } else {
+            // Not EP — could be a plain hubcloud/gdflix on the page for movies
+            val anchors = h.select("a[href]")
+            for (a in anchors) {
+                val href = a.attr("href")
+                val label = a.text().lowercase()
+                when {
+                    href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HubCloud", href, "MD"))
+                    href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
                 }
-                currentEp++
             }
         }
     }
-    BCLog.d("MD: series S${season}E${episode} -> ${out.size} mirrors")
     return out
 }
 
@@ -265,12 +281,10 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
 // ═══════════════════════════════════════════
 private suspend fun hdhub4uFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
-    BCLog.d("HDH: searching '$title' on $domain")
     return try {
         val html = app.get("$domain/?s=${URLEncoder.encode(title, "UTF-8")}").text
         val doc = Jsoup.parse(html)
         val cards = doc.select("li.thumb")
-        BCLog.d("HDH: ${cards.size} result cards")
         var bestUrl: String? = null
         var bestScore = 0
         for (card in cards) {
@@ -285,40 +299,29 @@ private suspend fun hdhub4uFindPage(title: String, year: String, type: String): 
             if (type == "movie" && (lower.contains("movie") || !lower.contains("season"))) score += 1
             if (score > bestScore) { bestScore = score; bestUrl = href }
         }
-        if (bestUrl != null) BCLog.d("HDH: matched $bestUrl (score=$bestScore)")
-        else BCLog.d("HDH: no title match")
         bestUrl
     } catch (e: Exception) {
-        BCLog.e("HDH search failed: ${e.message}")
-        null
+        BCLog.e("HDH search failed: ${e.message}"); null
     }
 }
 
 private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(pageUrl) ?: return out
-    val anchors = doc.select("a[href]")
-    for (a in anchors) {
+    for (a in doc.select("a[href]")) {
         val href = a.attr("href").trim()
         if (href.isEmpty() || href.startsWith("#") || !href.startsWith("http")) continue
         if (href.contains("t.me/") || href.contains("whatsapp") || href.contains("telegram")) continue
         if (href.contains("hdstream4u.com") || href.contains("greenmountmotors.com")) continue
-        if (href.contains("hdhub4u.") && href.contains("/category/")) continue
-
         val isWrapper =
-            href.contains("hubdrive.", true) ||
-            href.contains("hubcdn.", true) ||
-            href.contains("hblinks.co/archives/") ||
-            href.contains("4khdhub.one/") ||
-            href.contains("hubcloud.ist/drive/") ||
-            href.contains("hubcloud.cx/drive/") ||
+            href.contains("hubdrive.", true) || href.contains("hubcdn.", true) ||
+            href.contains("hblinks.co/archives/") || href.contains("4khdhub.one/") ||
+            href.contains("hubcloud.ist/drive/") || href.contains("hubcloud.cx/drive/") ||
             href.contains("vcloud.")
         if (!isWrapper) continue
-
         val text = a.text().lowercase()
         val q = Regex("""(\d{3,4}[pP])""").find(text)?.value
             ?: if (text.contains("4k") || text.contains("2160")) "2160p" else "Unknown"
-
         out.add(ScrapedMirror(q, "HDhub4u", href, "HDH"))
     }
     BCLog.d("HDH: extracted ${out.size} mirrors")
@@ -326,66 +329,46 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
 }
 
 // ═══════════════════════════════════════════
-// MovieBox — native API
+// MovieBox
 // ═══════════════════════════════════════════
-private suspend fun movieboxFindSubject(title: String, year: String, type: String): MBSubject? {
-    val results = try { mbSearch(title) } catch (e: Exception) {
-        BCLog.e("MB search failed: ${e.message}")
-        return null
-    }
-    BCLog.d("MB: search returned ${results.size} results")
-    if (results.isEmpty()) return null
-
-    val expectedType = if (type == "series") 2 else 1
+private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
+    val results = try { mbSearch(q.title) } catch (e: Exception) { emptyList() }
+    if (results.isEmpty()) return emptyList()
+    val expectedType = if (q.type == "series") 2 else 1
     var best: MBSubject? = null
     var bestScore = 0
     for (s in results) {
-        if (!titleMatches(title, s.title)) continue
+        if (!titleMatches(q.title, s.title)) continue
         var score = 1
-        if (year.isNotBlank() && s.year?.toString()?.contains(year) == true) score += 2
+        if (q.year.isNotBlank() && s.year?.toString()?.contains(q.year) == true) score += 2
         if (s.type == expectedType) score += 2
         if (score > bestScore) { bestScore = score; best = s }
     }
-    if (best != null) BCLog.d("MB: matched '${best.title}' (${best.year}) id=${best.subjectId}")
-    else BCLog.d("MB: no title match")
-    return best
-}
-
-private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
-    val subject = movieboxFindSubject(q.title, q.year, q.type) ?: return emptyList()
-    val streams = try {
-        mbPlay(subject.subjectId, q.season, q.episode)
-    } catch (e: Exception) {
-        BCLog.e("MB play failed: ${e.message}")
-        emptyList()
-    }
-    BCLog.d("MB: play returned ${streams.size} streams")
-    return streams.map { s ->
-        ScrapedMirror(
-            quality = s.quality.ifBlank { "Auto" },
-            mirror = "MovieBox",
-            url = s.url,
-            source = "MB"
-        )
-    }
+    val subject = best ?: return emptyList()
+    val streams = try { mbPlay(subject.subjectId, q.season, q.episode) } catch (e: Exception) { emptyList() }
+    return streams.map { ScrapedMirror(it.quality.ifBlank { "Auto" }, "MovieBox", it.url, "MB") }
 }
 
 // ═══════════════════════════════════════════
-// Wrapper resolution
+// Wrapper resolution — passes through to loadLinks
 // ═══════════════════════════════════════════
 suspend fun resolveWrapper(url: String): String? {
+    // Direct hubcloud / vcloud URLs
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
-    if (url.contains("greenmountmotors.com")) return null
-    if (url.contains("hdstream4u.com")) return null
+    // gdflix — return as is; Filepress/GDFlix extractor handles it
+    if (url.contains("gdflix", true)) return url
+    // Dead ends
+    if (url.contains("greenmountmotors.com") || url.contains("hdstream4u.com")) return null
 
+    // Wrapper — fetch and look for hubcloud / vcloud / gdflix
     val doc = cloudflareGetDoc(url)
     if (doc == null) {
-        BCLog.e("resolveWrapper: fetch failed for $url")
-        return null
+        BCLog.e("resolveWrapper: fetch failed for $url"); return null
     }
     doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
+    doc.selectFirst("a[href*='gdflix']")?.attr("href")?.let { return it }
     return null
 }
 
@@ -397,52 +380,31 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     return coroutineScope {
         val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<ScrapedMirror>>>()
 
-        if (Settings.isSrcVm()) {
-            jobs.add(async {
-                try {
-                    val page = vegamoviesFindPage(q.title, q.year, q.type) ?: return@async emptyList()
-                    if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
-                    else vegamoviesExtractMovieRaw(page)
-                } catch (e: Exception) {
-                    BCLog.e("VM task failed: ${e.message}"); emptyList()
-                }
-            })
-        }
-        if (Settings.isSrcMd()) {
-            jobs.add(async {
-                try {
-                    val page = moviesdriveFindPage(q.title, q.year, q.type) ?: return@async emptyList()
-                    if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
-                    else moviesdriveExtractMovieRaw(page)
-                } catch (e: Exception) {
-                    BCLog.e("MD task failed: ${e.message}"); emptyList()
-                }
-            })
-        }
-        if (Settings.isSrcHdh()) {
-            jobs.add(async {
-                try {
-                    val page = hdhub4uFindPage(q.title, q.year, q.type) ?: return@async emptyList()
-                    hdhub4uExtractRaw(page)
-                } catch (e: Exception) {
-                    BCLog.e("HDH task failed: ${e.message}"); emptyList()
-                }
-            })
-        }
-        if (Settings.isSrcMovieBox()) {
-            jobs.add(async {
-                try {
-                    movieboxExtractRaw(q)
-                } catch (e: Exception) {
-                    BCLog.e("MB task failed: ${e.message}"); emptyList()
-                }
-            })
-        }
+        if (Settings.isSrcVm()) jobs.add(async {
+            try {
+                val page = vegamoviesFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
+                else vegamoviesExtractMovieRaw(page)
+            } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
+        })
+        if (Settings.isSrcMd()) jobs.add(async {
+            try {
+                val page = moviesdriveFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
+                else moviesdriveExtractMovieRaw(page)
+            } catch (e: Exception) { BCLog.e("MD task failed: ${e.message}"); emptyList() }
+        })
+        if (Settings.isSrcHdh()) jobs.add(async {
+            try {
+                val page = hdhub4uFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                hdhub4uExtractRaw(page)
+            } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
+        })
+        if (Settings.isSrcMovieBox()) jobs.add(async {
+            try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+        })
 
-        if (jobs.isEmpty()) {
-            BCLog.d("no sources enabled")
-            return@coroutineScope emptyList()
-        }
+        if (jobs.isEmpty()) return@coroutineScope emptyList()
         val all = jobs.awaitAll().flatten()
         val vm = all.count { it.source == "VM" }
         val md = all.count { it.source == "MD" }
@@ -456,11 +418,7 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
 suspend fun isHubcloudAlive(url: String): Boolean {
     return try {
         val html = app.get(url, timeout = 2500L).text
-        html.contains("card-header", true) ||
-            html.contains("File Size", true) ||
-            html.contains("btn-success", true) ||
-            html.contains("btn-danger", true)
-    } catch (e: Exception) {
-        false
-    }
+        html.contains("card-header", true) || html.contains("File Size", true) ||
+            html.contains("btn-success", true) || html.contains("btn-danger", true)
+    } catch (e: Exception) { false }
 }
