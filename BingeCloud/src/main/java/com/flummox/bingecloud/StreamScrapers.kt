@@ -427,22 +427,3 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         all
     }
 }
-
-suspend fun isHubcloudAlive(url: String): Boolean {
-    val lower = url.lowercase()
-    if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".m3u8")
-        || lower.contains(".m3u8?") || lower.endsWith(".mpd")
-        || lower.contains("drive.google.com")) return true
-    val checkable = url.contains("hubcloud", true) || url.contains("gdflix", true)
-        || url.contains("vcloud", true) || url.contains("gamerxyt", true)
-    if (!checkable) return true
-    return try {
-        val html = app.get(url, timeout = 1500L).text
-        val l = html.lowercase()
-        if (l.contains("just a moment") || l.contains("checking your browser")) return true
-        l.contains("card-header") || l.contains("file size")
-            || l.contains("btn-success") || l.contains("btn-danger")
-            || l.contains("download") || l.contains("gdflix")
-            || l.contains("hubcloud") || l.contains("atob(")
-    } catch (e: Exception) { false }
-}
