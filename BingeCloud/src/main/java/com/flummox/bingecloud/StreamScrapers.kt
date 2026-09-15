@@ -23,7 +23,8 @@ data class ScrapedMirror(
     val quality: String,
     val mirror: String,
     val url: String,
-    val source: String
+    val source: String,
+    val headers: Map<String, String>? = null
 )
 
 private suspend fun resolveDomain(key: String, fallback: String): String {
@@ -140,7 +141,6 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
     BCLog.d("MD: WP REST search '$title' on $domain")
     return try {
-        // WordPress REST API — no JS needed
         val url = "$domain/wp-json/wp/v2/posts?search=${URLEncoder.encode(title, "UTF-8")}&per_page=20"
         val json = app.get(url).text
         val arr = try { JSONArray(json) } catch (e: Exception) {
@@ -194,6 +194,7 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
     BCLog.d("MD: extracted ${results.size} mirrors")
     results
 }
+
 /** Series extraction — same detail structure, filter by season if labeled. */
 private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> = coroutineScope {
     val doc = safeGet(pageUrl) ?: return@coroutineScope emptyList()
@@ -262,7 +263,6 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
     }
     return out
 }
-
 
 // ═══════════════════════════════════════════
 // HDhub4u
@@ -334,22 +334,26 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     }
     val subject = best ?: return emptyList()
     val streams = try { mbPlay(subject.subjectId, q.season, q.episode) } catch (e: Exception) { emptyList() }
-    return streams.map { ScrapedMirror(it.quality.ifBlank { "Auto" }, "MovieBox", it.url, "MB") }
+    return streams.map {
+        ScrapedMirror(
+            quality = it.quality.ifBlank { "Auto" },
+            mirror = "MovieBox",
+            url = it.url,
+            source = "MB",
+            headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
+        )
+    }
 }
 
 // ═══════════════════════════════════════════
 // Wrapper resolution — passes through to loadLinks
 // ═══════════════════════════════════════════
 suspend fun resolveWrapper(url: String): String? {
-    // Direct hubcloud / vcloud URLs
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
-    // gdflix — return as is; Filepress/GDFlix extractor handles it
     if (url.contains("gdflix", true)) return url
-    // Dead ends
     if (url.contains("greenmountmotors.com") || url.contains("hdstream4u.com")) return null
 
-    // Wrapper — fetch and look for hubcloud / vcloud / gdflix
     val doc = cloudflareGetDoc(url)
     if (doc == null) {
         BCLog.e("resolveWrapper: fetch failed for $url"); return null
@@ -404,12 +408,11 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
 }
 
 suspend fun isHubcloudAlive(url: String): Boolean {
-    // Direct video URLs — not HTML, let through
     val lower = url.lowercase()
     if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".m3u8")
-        || lower.contains(".m3u8?") || lower.contains("drive.google.com")) return true
+        || lower.contains(".m3u8?") || lower.endsWith(".mpd")
+        || lower.contains("drive.google.com")) return true
 
-    // Only worth checking hubcloud / gdflix / vcloud pages — everything else passes
     val checkable = url.contains("hubcloud", true)
         || url.contains("gdflix", true)
         || url.contains("vcloud", true)
