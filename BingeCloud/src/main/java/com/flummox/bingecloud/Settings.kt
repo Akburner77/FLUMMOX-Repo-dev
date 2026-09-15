@@ -825,8 +825,7 @@ run {
     ))
     logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
 
-    val logScrollbar = LogScrollbar(ctx, logScroll, trackColor = INPUT, thumbColor = ACCENT_STRONG)
-
+    val logScrollbar = LogScrollbar(ctx, logScroll)
     val logRow = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(
@@ -838,9 +837,9 @@ run {
         }
     }
     logRow.addView(logScroll, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-    logRow.addView(logScrollbar, LinearLayout.LayoutParams(dp(ctx, 14), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-        leftMargin = dp(ctx, 4)
-    })
+    logRow.addView(logScrollbar, LinearLayout.LayoutParams(dp(ctx, 10), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+    leftMargin = dp(ctx, 2)
+})
 
     val btnRow = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
