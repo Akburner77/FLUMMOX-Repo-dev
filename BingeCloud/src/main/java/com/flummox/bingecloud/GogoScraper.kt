@@ -2,9 +2,11 @@ package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.app
 
+// ═══════════════════════════════════════════
 // ── GogoAnime scraper ──
-// Only runs when q.type contains "anime".
-// search → anime page → episode list → target episode page → iframe src → ScrapedMirror
+// Runs on every title (not just anime) since aiometa types
+// anime as "series". Non-anime titles return empty quickly.
+// ═══════════════════════════════════════════
 
 private const val GOGO_DOMAIN = "https://gogoanime.by"
 
@@ -60,7 +62,6 @@ private suspend fun gogoEpisodes(animeUrl: String): List<Pair<Int, String>> {
 }
 
 suspend fun gogoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
-    if (!q.type.contains("anime", true)) return emptyList()
     val animePage = gogoFindAnimePage(q.title) ?: return emptyList()
     BCLog.d("Gogo: matched $animePage")
 
