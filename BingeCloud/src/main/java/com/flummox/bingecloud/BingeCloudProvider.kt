@@ -215,10 +215,10 @@ open class BingeCloudProvider : MainAPI() {
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "MovieBox",
-                                        name = "MovieBox · ${m.quality}",
+                                        name = "${m.mirror} · ${m.quality}",
                                         url = m.url,
                                         type = linkType
-                                    ) {
+                                 ) {
                                         this.referer = "https://h5.aoneroom.com/"
                                         this.quality = qualityRank(m.quality)
                                             .takeIf { it > 0 } ?: Qualities.Unknown.value
