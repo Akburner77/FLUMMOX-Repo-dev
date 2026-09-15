@@ -52,26 +52,54 @@ private fun titleMatches(a: String, b: String): Boolean {
     return common.size >= 2 && common.size.toFloat() / maxOf(ta.size, tb.size) >= 0.6f
 }
 
-private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
+private fun extractSeasons(title: String): List<Int> =
+    Regex("""(?i)\bseason\s*0*(\d+)\b""").findAll(title)
+        .mapNotNull { it.groupValues[1].toIntOrNull() }.toList()
+
+private fun pageHasSeason(title: String, targetSeason: Int): Boolean {
+    if (targetSeason <= 0) return true
+    val seasons = extractSeasons(title)
+    if (seasons.isEmpty()) return true
+    return seasons.contains(targetSeason)
+}
+
+private fun prettyAudio(raw: String): String {
+    val l = raw.lowercase()
+    return when {
+        l.contains("original") -> "Original"
+        l.contains("hindi") -> "Hindi"
+        l.contains("esla") || l.contains("spanish") -> "Spanish"
+        l.contains("ptbr") || l.contains("portug") -> "Portuguese"
+        else -> raw.replace(Regex("""(?i)\s*\(?\s*(dub|audio)\s*\)?"""), " ").trim().ifBlank { "Auto" }
+    }
+}
+
+private suspend fun cachedGet(url: String): String? {
+    BCCache.get(url)?.let { return it }
     return try {
-        app.get(url).document
+        val body = app.get(url).text
+        BCCache.put(url, body)
+        body
     } catch (e: Exception) {
         BCLog.e("GET failed $url: ${e.message}")
         null
     }
 }
 
-// ═══════════════════════════════════════════
-// VegaMovies
-// ═══════════════════════════════════════════
-private suspend fun vegamoviesFindPage(title: String, year: String, type: String): String? {
+private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
+    val html = cachedGet(url) ?: return null
+    return try { Jsoup.parse(html, url) } catch (e: Exception) {
+        BCLog.e("Jsoup parse failed: ${e.message}"); null
+    }
+}
+
+// ═══════════════════════════════════════════ VegaMovies
+private suspend fun vegamoviesFindPage(title: String, year: String, type: String, season: Int): String? {
     val domain = resolveDomain("vegamovies", "https://vegamovies.mq")
-    BCLog.d("VM: searching '$title' on $domain")
+    BCLog.d("VM: searching '$title' S$season")
     return try {
-        val json = app.get("$domain/search.php?q=${URLEncoder.encode(title, "UTF-8")}").text
-        val hits = JSONObject(json).optJSONArray("hits") ?: run {
-            BCLog.e("VM: no 'hits' in search response"); return null
-        }
+        val json = cachedGet("$domain/search.php?q=${URLEncoder.encode(title, "UTF-8")}") ?: return null
+        val hits = JSONObject(json).optJSONArray("hits") ?: return null
         var bestPath: String? = null
         var bestScore = 0
         for (i in 0 until hits.length()) {
@@ -80,6 +108,10 @@ private suspend fun vegamoviesFindPage(title: String, year: String, type: String
             val permalink = doc.optString("permalink")
             if (postTitle.isEmpty() || permalink.isEmpty()) continue
             if (!titleMatches(title, postTitle)) continue
+            if (type == "series" && !pageHasSeason(postTitle, season)) {
+                BCLog.d("VM: skip wrong season: $postTitle")
+                continue
+            }
             var score = 1
             if (year.isNotBlank() && postTitle.contains(year)) score += 2
             val lower = postTitle.lowercase()
@@ -134,18 +166,14 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
     return out
 }
 
-// ═══════════════════════════════════════════
-// MoviesDrive
-// ═══════════════════════════════════════════
-private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
+// ═══════════════════════════════════════════ MoviesDrive
+private suspend fun moviesdriveFindPage(title: String, year: String, type: String, season: Int): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
-    BCLog.d("MD: WP REST search '$title' on $domain")
+    BCLog.d("MD: searching '$title' S$season")
     return try {
         val url = "$domain/wp-json/wp/v2/posts?search=${URLEncoder.encode(title, "UTF-8")}&per_page=20"
-        val json = app.get(url).text
-        val arr = try { JSONArray(json) } catch (e: Exception) {
-            BCLog.e("MD: REST parse failed"); return null
-        }
+        val json = cachedGet(url) ?: return null
+        val arr = try { JSONArray(json) } catch (e: Exception) { return null }
         BCLog.d("MD: REST returned ${arr.length()} posts")
         var bestUrl: String? = null
         var bestScore = 0
@@ -154,8 +182,11 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
             val rendered = post.optJSONObject("title")?.optString("rendered") ?: continue
             val postTitle = Jsoup.parse(rendered).text()
             val link = post.optString("link")
-            if (link.isEmpty()) continue
-            if (!titleMatches(title, postTitle)) continue
+            if (link.isEmpty() || !titleMatches(title, postTitle)) continue
+            if (type == "series" && !pageHasSeason(postTitle, season)) {
+                BCLog.d("MD: skip wrong season: $postTitle")
+                continue
+            }
             var score = 1
             if (year.isNotBlank() && postTitle.contains(year)) score += 2
             val lower = postTitle.lowercase()
@@ -163,8 +194,6 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
             if (type == "movie" && (lower.contains("full movie") || !lower.contains("season"))) score += 1
             if (score > bestScore) { bestScore = score; bestUrl = link }
         }
-        if (bestUrl != null) BCLog.d("MD: matched $bestUrl")
-        else BCLog.d("MD: no title match")
         bestUrl
     } catch (e: Exception) {
         BCLog.e("MD search failed: ${e.message}"); null
@@ -176,8 +205,7 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
     val allH5 = doc.select("h5")
     val jobs = mutableListOf<Pair<String, String>>()
     for (i in allH5.indices) {
-        val txt = allH5[i].text()
-        val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
+        val q = Regex("""(\d{3,4}[pP])""").find(allH5[i].text())?.value ?: continue
         for (j in i + 1 until minOf(i + 4, allH5.size)) {
             val anchor = allH5[j].selectFirst("a[href*='mdrive.lol/archive/'], a[href*='moviesdrives']")
                 ?: allH5[j].selectFirst("a[href*='archive']")
@@ -187,9 +215,7 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
             break
         }
     }
-    val results = jobs.map { (q, archiveUrl) ->
-        async { extractFromArchivePage(archiveUrl, q) }
-    }.awaitAll().flatten()
+    val results = jobs.map { (q, url) -> async { extractFromArchivePage(url, q) } }.awaitAll().flatten()
     BCLog.d("MD: extracted ${results.size} mirrors")
     results
 }
@@ -216,10 +242,8 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
             break
         }
     }
-    val results = jobs.map { (q, archiveUrl) ->
-        async { extractFromArchivePage(archiveUrl, q, episode) }
-    }.awaitAll().flatten()
-    BCLog.d("MD: series S${season}E${episode} → ${results.size} mirrors")
+    val results = jobs.map { (q, url) -> async { extractFromArchivePage(url, q, episode) } }.awaitAll().flatten()
+    BCLog.d("MD: series S${season}E${episode} → ${results.size}")
     results
 }
 
@@ -235,24 +259,20 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
             val epNum = epMatch.groupValues[1].toIntOrNull() ?: 0
             if (targetEp > 0 && epNum != targetEp) continue
             for (j in i + 1 until minOf(i + 4, allH5.size)) {
-                val anchors = allH5[j].select("a[href]")
-                for (a in anchors) {
-                    val href = a.attr("href")
-                    val label = a.text().lowercase()
+                for (a in allH5[j].select("a[href]")) {
+                    val href = a.attr("href"); val label = a.text().lowercase()
                     when {
-                        href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HubCloud", href, "MD"))
+                        href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HCloud", href, "MD"))
                         href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
                     }
                 }
                 if (allH5[j].text().contains(Regex("""EP\s*0*\d+""", RegexOption.IGNORE_CASE))) break
             }
         } else {
-            val anchors = h.select("a[href]")
-            for (a in anchors) {
-                val href = a.attr("href")
-                val label = a.text().lowercase()
+            for (a in h.select("a[href]")) {
+                val href = a.attr("href"); val label = a.text().lowercase()
                 when {
-                    href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HubCloud", href, "MD"))
+                    href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HCloud", href, "MD"))
                     href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
                 }
             }
@@ -261,13 +281,11 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
     return out
 }
 
-// ═══════════════════════════════════════════
-// HDhub4u
-// ═══════════════════════════════════════════
-private suspend fun hdhub4uFindPage(title: String, year: String, type: String): String? {
+// ═══════════════════════════════════════════ HDhub4u
+private suspend fun hdhub4uFindPage(title: String, year: String, type: String, season: Int): String? {
     val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
     return try {
-        val html = app.get("$domain/?s=${URLEncoder.encode(title, "UTF-8")}").text
+        val html = cachedGet("$domain/?s=${URLEncoder.encode(title, "UTF-8")}") ?: return null
         val doc = Jsoup.parse(html)
         val cards = doc.select("li.thumb")
         var bestUrl: String? = null
@@ -277,6 +295,10 @@ private suspend fun hdhub4uFindPage(title: String, year: String, type: String): 
                 ?: card.selectFirst("img")?.attr("alt") ?: continue
             val href = card.selectFirst("a")?.attr("href") ?: continue
             if (href.isEmpty() || !titleMatches(title, alt)) continue
+            if (type == "series" && !pageHasSeason(alt, season)) {
+                BCLog.d("HDH: skip wrong season: $alt")
+                continue
+            }
             var score = 1
             if (year.isNotBlank() && alt.contains(year)) score += 2
             val lower = alt.lowercase()
@@ -307,15 +329,13 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
         val text = a.text().lowercase()
         val q = Regex("""(\d{3,4}[pP])""").find(text)?.value
             ?: if (text.contains("4k") || text.contains("2160")) "2160p" else "Unknown"
-        out.add(ScrapedMirror(q, "HDhub4u", href, "HDH"))
+        out.add(ScrapedMirror(q, "HDhub", href, "HDH"))
     }
-    BCLog.d("HDH: extracted ${out.size} mirrors")
+    BCLog.d("HDH: extracted ${out.size}")
     return out
 }
 
-// ═══════════════════════════════════════════
-// MovieBox
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════ MovieBox
 private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = coroutineScope {
     val results = try { mbSearch(q.title) } catch (e: Exception) { emptyList() }
     if (results.isEmpty()) return@coroutineScope emptyList()
@@ -331,53 +351,41 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
     }
     val subject = best ?: return@coroutineScope emptyList()
 
-    // Get every available audio track (original + dubs), then fetch play-info per track in parallel
     val languages = try { mbLanguages(subject.subjectId) } catch (e: Exception) {
-        BCLog.e("MB langs failed: ${e.message}")
         listOf(subject.subjectId to "Original")
     }
 
     val allStreams = languages.map { (sid, lang) ->
-        async {
-            try { mbPlay(sid, q.season, q.episode, lang) } catch (e: Exception) { emptyList() }
-        }
+        async { try { mbPlay(sid, q.season, q.episode, lang) } catch (e: Exception) { emptyList() } }
     }.awaitAll().flatten()
 
-    BCLog.d("MB total: ${allStreams.size} streams across ${languages.size} languages")
+    BCLog.d("MB total: ${allStreams.size} streams / ${languages.size} langs")
 
-    allStreams.map {
-        val audioLabel = it.audio?.takeIf { a -> a.isNotBlank() }?.let { a -> " ($a Audio)" } ?: ""
+    allStreams.distinctBy { it.url }.map {
         ScrapedMirror(
             quality = it.quality.ifBlank { "Auto" },
-            mirror = "MovieBox$audioLabel",
+            mirror = prettyAudio(it.audio ?: "MovieBox"),
             url = it.url,
             source = "MB",
             headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
         )
     }
 }
-// ═══════════════════════════════════════════
-// Wrapper resolution
-// ═══════════════════════════════════════════
+
+// ═══════════════════════════════════════════ Wrapper
 suspend fun resolveWrapper(url: String): String? {
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
     if (url.contains("gdflix", true)) return url
     if (url.contains("greenmountmotors.com") || url.contains("hdstream4u.com")) return null
-
-    val doc = cloudflareGetDoc(url)
-    if (doc == null) {
-        BCLog.e("resolveWrapper: fetch failed for $url"); return null
-    }
+    val doc = cloudflareGetDoc(url) ?: return null
     doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='gdflix']")?.attr("href")?.let { return it }
     return null
 }
 
-// ═══════════════════════════════════════════
-// Entry
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════ Entry
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     BCLog.section("scrapeAllSources: ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
     return coroutineScope {
@@ -385,21 +393,21 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
 
         if (Settings.isSrcVm()) jobs.add(async {
             try {
-                val page = vegamoviesFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
                 if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
                 else vegamoviesExtractMovieRaw(page)
             } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
         })
         if (Settings.isSrcMd()) jobs.add(async {
             try {
-                val page = moviesdriveFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                val page = moviesdriveFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
                 if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
                 else moviesdriveExtractMovieRaw(page)
             } catch (e: Exception) { BCLog.e("MD task failed: ${e.message}"); emptyList() }
         })
         if (Settings.isSrcHdh()) jobs.add(async {
             try {
-                val page = hdhub4uFindPage(q.title, q.year, q.type) ?: return@async emptyList()
+                val page = hdhub4uFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
                 hdhub4uExtractRaw(page)
             } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
         })
@@ -423,20 +431,16 @@ suspend fun isHubcloudAlive(url: String): Boolean {
     if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".m3u8")
         || lower.contains(".m3u8?") || lower.endsWith(".mpd")
         || lower.contains("drive.google.com")) return true
-
-    val checkable = url.contains("hubcloud", true)
-        || url.contains("gdflix", true)
-        || url.contains("vcloud", true)
-        || url.contains("gamerxyt", true)
+    val checkable = url.contains("hubcloud", true) || url.contains("gdflix", true)
+        || url.contains("vcloud", true) || url.contains("gamerxyt", true)
     if (!checkable) return true
-
     return try {
         val html = app.get(url, timeout = 1500L).text
-        val lower2 = html.lowercase()
-        if (lower2.contains("just a moment") || lower2.contains("checking your browser")) return true
-        lower2.contains("card-header") || lower2.contains("file size") ||
-            lower2.contains("btn-success") || lower2.contains("btn-danger") ||
-            lower2.contains("download") || lower2.contains("gdflix") ||
-            lower2.contains("hubcloud") || lower2.contains("atob(")
+        val l = html.lowercase()
+        if (l.contains("just a moment") || l.contains("checking your browser")) return true
+        l.contains("card-header") || l.contains("file size")
+            || l.contains("btn-success") || l.contains("btn-danger")
+            || l.contains("download") || l.contains("gdflix")
+            || l.contains("hubcloud") || l.contains("atob(")
     } catch (e: Exception) { false }
 }
