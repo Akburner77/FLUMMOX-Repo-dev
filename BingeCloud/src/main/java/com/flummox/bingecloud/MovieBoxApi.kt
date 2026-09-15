@@ -275,6 +275,27 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
 suspend fun mbDetail(subjectId: String): JSONObject? =
     mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
+/** Returns list of (subjectId, lanName) — Original first, then each dub. */
+suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
+    val out = mutableListOf<Pair<String, String>>()
+    out.add(originalSubjectId to "Original")
+    val detail = try { mbDetail(originalSubjectId) } catch (e: Exception) { null } ?: return out
+    val dubs = detail.optJSONObject("data")?.optJSONArray("dubs") ?: return out
+    BCLog.d("MB dubs array len=${dubs.length()}")
+    for (i in 0 until dubs.length()) {
+        val d = dubs.optJSONObject(i) ?: continue
+        val id = d.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
+        val lan = d.optString("lanName").takeIf { it.isNotBlank() } ?: continue
+        if (id == originalSubjectId) {
+            out[0] = originalSubjectId to lan
+            continue
+        }
+        out.add(id to lan)
+    }
+    BCLog.d("MB langs: ${out.map { it.second }}")
+    return out
+}
+
 suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     BCLog.d("MB play: $q (audio=$audioLabel)")
