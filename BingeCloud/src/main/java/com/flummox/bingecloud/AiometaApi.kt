@@ -6,11 +6,8 @@ import java.net.URLEncoder
 
 const val AIOMETA_BASE = "https://aiometadata.elfhosted.com/stremio/9197a4a9-2f5b-4911-845e-8704c520bdf7"
 
-data class AioCast(
-    val name: String? = null,
-    val character: String? = null,
-    val photo: String? = null
-)
+// ── data models ──
+data class AioCast(val name: String? = null, val character: String? = null, val photo: String? = null)
 
 data class AioVideo(
     val id: String? = null,
@@ -54,6 +51,7 @@ data class AioMeta(
 data class AioMetaResponse(val meta: AioMeta? = null)
 data class AioCatalogResponse(val metas: List<AioMeta>? = null)
 
+// ── endpoints ──
 suspend fun aioFetchMeta(type: String, id: String): AioMeta? {
     return try {
         val url = "$AIOMETA_BASE/meta/$type/$id.json"
@@ -67,13 +65,24 @@ suspend fun aioFetchMeta(type: String, id: String): AioMeta? {
 suspend fun aioFetchCatalog(
     type: String,
     catalogId: String,
-    genre: String? = null,
+    param: String? = null,
     skip: Int = 0
 ): List<AioMeta> {
     return try {
         val extras = StringBuilder()
-        if (!genre.isNullOrBlank()) {
-            extras.append("genre=").append(URLEncoder.encode(genre, "UTF-8")).append("&")
+        if (!param.isNullOrBlank()) {
+            // ── if value looks like "key=val", split and encode the value side ──
+            // ── if bare value, fall back to legacy genre= param ──
+            val eq = param.indexOf('=')
+            if (eq > 0) {
+                val key = param.substring(0, eq).trim()
+                val value = param.substring(eq + 1).trim()
+                extras.append(key).append("=")
+                    .append(URLEncoder.encode(value, "UTF-8"))
+                    .append("&")
+            } else {
+                extras.append("genre=").append(URLEncoder.encode(param, "UTF-8")).append("&")
+            }
         }
         extras.append("skip=").append(skip)
 
