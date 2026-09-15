@@ -16,7 +16,9 @@ data class StreamQuery(
     val type: String,
     val imdbId: String = "",
     val season: Int = 0,
-    val episode: Int = 0
+    val episode: Int = 0,
+    val nextSeason: Int = 0,
+    val nextEpisode: Int = 0
 )
 
 data class ScrapedMirror(
