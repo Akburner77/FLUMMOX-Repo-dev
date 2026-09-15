@@ -135,7 +135,7 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
 }
 
 // ═══════════════════════════════════════════
-// MoviesDrive — WP REST search + h5 > a extraction
+// MoviesDrive
 // ═══════════════════════════════════════════
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
@@ -171,7 +171,6 @@ private suspend fun moviesdriveFindPage(title: String, year: String, type: Strin
     }
 }
 
-/** Movie extraction — detail page has h5 > a pointing to mdrive.lol/archive/NNN. */
 private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMirror> = coroutineScope {
     val doc = safeGet(pageUrl) ?: return@coroutineScope emptyList()
     val allH5 = doc.select("h5")
@@ -195,7 +194,6 @@ private suspend fun moviesdriveExtractMovieRaw(pageUrl: String): List<ScrapedMir
     results
 }
 
-/** Series extraction — same detail structure, filter by season if labeled. */
 private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> = coroutineScope {
     val doc = safeGet(pageUrl) ?: return@coroutineScope emptyList()
     val allH5 = doc.select("h5")
@@ -225,7 +223,6 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
     results
 }
 
-/** mdrive.lol/archive/NNN page — extract EP + HubCloud/GDFlix links. */
 private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, targetEp: Int = 0): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(archiveUrl) ?: return out
@@ -335,20 +332,19 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val subject = best ?: return emptyList()
     val streams = try { mbPlay(subject.subjectId, q.season, q.episode) } catch (e: Exception) { emptyList() }
     return streams.map {
-        return streams.map {
-    val audioLabel = it.audio?.takeIf { a -> a.isNotBlank() }?.let { a -> " ($a Audio)" } ?: ""
-    ScrapedMirror(
-        quality = it.quality.ifBlank { "Auto" },
-        mirror = "MovieBox$audioLabel",
-        url = it.url,
-        source = "MB",
-        headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
-    )
-  }
+        val audioLabel = it.audio?.takeIf { a -> a.isNotBlank() }?.let { a -> " ($a Audio)" } ?: ""
+        ScrapedMirror(
+            quality = it.quality.ifBlank { "Auto" },
+            mirror = "MovieBox$audioLabel",
+            url = it.url,
+            source = "MB",
+            headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
+        )
+    }
 }
 
 // ═══════════════════════════════════════════
-// Wrapper resolution — passes through to loadLinks
+// Wrapper resolution
 // ═══════════════════════════════════════════
 suspend fun resolveWrapper(url: String): String? {
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
