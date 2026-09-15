@@ -5,11 +5,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * In-memory ring buffer logger for BingeCloud.
- * Keeps the last 800 lines, thread-safe, shown in Settings → Debug Logs.
- * Tokens, cookies, JWTs are stripped by allSanitized() before display/share/save.
- */
 object BCLog {
 
     private const val MAX_LINES = 800
@@ -62,14 +57,11 @@ object BCLog {
         Log.d(TAG, line)
     }
 
-    /** Raw — internal use only. */
-    fun all(): String = synchronized(lock) {
-        if (buffer.isEmpty()) "(no logs yet)"
-        else buffer.joinToString("\n")
-    }
-
-    /** Sanitized — safe for display, copy, share, save. */
-    fun allSanitized(): String = sanitize(all())
+    fun allSanitized(): String = sanitize(
+        synchronized(lock) {
+            if (buffer.isEmpty()) "(no logs yet)" else buffer.joinToString("\n")
+        }
+    )
 
     fun count(): Int = synchronized(lock) { buffer.size }
 
