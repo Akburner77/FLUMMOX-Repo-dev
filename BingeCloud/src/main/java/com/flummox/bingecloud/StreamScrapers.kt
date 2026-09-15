@@ -335,14 +335,16 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val subject = best ?: return emptyList()
     val streams = try { mbPlay(subject.subjectId, q.season, q.episode) } catch (e: Exception) { emptyList() }
     return streams.map {
-        ScrapedMirror(
-            quality = it.quality.ifBlank { "Auto" },
-            mirror = "MovieBox",
-            url = it.url,
-            source = "MB",
-            headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
-        )
-    }
+        return streams.map {
+    val audioLabel = it.audio?.takeIf { a -> a.isNotBlank() }?.let { a -> " ($a Audio)" } ?: ""
+    ScrapedMirror(
+        quality = it.quality.ifBlank { "Auto" },
+        mirror = "MovieBox$audioLabel",
+        url = it.url,
+        source = "MB",
+        headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
+    )
+  }
 }
 
 // ═══════════════════════════════════════════
