@@ -102,7 +102,6 @@ open class BingeCloudProvider : MainAPI() {
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
-        // Prefetch first episode (series) or movie itself
         if (Settings.isPrefetchEnabled()) {
             val prefetchQuery: StreamQuery? = when {
                 tvType == TvType.Movie -> StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
@@ -193,9 +192,8 @@ open class BingeCloudProvider : MainAPI() {
         val pref = Settings.getQualityPref()
         val prefRank = qualityRank(pref)
         val sorted = mirrors.sortedWith(
-            compareByDescending<ScrapedMirror> {
-                if (prefRank > 0 && qualityRank(it.quality) == prefRank) 1 else 0
-            }
+            compareBy<ScrapedMirror> { sourcePriority(it.source) }
+                .thenByDescending { if (prefRank > 0 && qualityRank(it.quality) == prefRank) 1 else 0 }
                 .thenByDescending { qualityRank(it.quality) }
                 .thenBy { audioPriority(it.mirror, it.source) }
         )
@@ -204,44 +202,55 @@ open class BingeCloudProvider : MainAPI() {
         BCLog.d("resolving ${sorted.size} mirrors (c=$concurrency, prefilter=$prefilter)")
 
         val sem = Semaphore(concurrency)
-        coroutineScope {
+
+        // Resolve in parallel, capture into lists, then invoke callbacks in SORTED order.
+        val perMirror: List<List<ExtractorLink>> = coroutineScope {
             sorted.map { m ->
                 async {
                     sem.withPermit {
                         try {
-                            if (m.source == "MB") {
-                                val linkType = when {
-                                    m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
-                                    m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
-                                    else -> ExtractorLinkType.VIDEO
+                            when (m.source) {
+                                "MB" -> {
+                                    val linkType = when {
+                                        m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                        m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                        else -> ExtractorLinkType.VIDEO
+                                    }
+                                    val display = "${m.quality} •MB ${m.mirror}"
+                                    BCLog.d("MB link: $display")
+                                    val hdrs = m.headers
+                                    listOf(newExtractorLink("MovieBox", display, m.url, linkType) {
+                                        this.referer = "https://h5.aoneroom.com/"
+                                        if (hdrs != null) this.headers = hdrs
+                                    })
                                 }
-                                val display = "${m.quality} •MB ${m.mirror}"
-                                BCLog.d("MB link: $display")
-                                val hdrs = m.headers
-                                callback.invoke(newExtractorLink("MovieBox", display, m.url, linkType) {
-                                    this.referer = "https://h5.aoneroom.com/"
-                                    this.quality = qualityRank(m.quality).takeIf { it > 0 } ?: Qualities.Unknown.value
-                                    if (hdrs != null) this.headers = hdrs
-                                })
-                                return@withPermit
+                                else -> {
+                                    val finalUrl = resolveWrapper(m.url)
+                                    if (finalUrl == null) {
+                                        BCLog.d("unresolved: ${m.mirror}")
+                                        emptyList()
+                                    } else if (prefilter && !isHubcloudAlive(finalUrl)) {
+                                        BCLog.d("prefilter drop: ${m.mirror}")
+                                        emptyList()
+                                    } else {
+                                        val bag = mutableListOf<ExtractorLink>()
+                                        VCloud(m.source, m.mirror, m.quality).getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
+                                        bag
+                                    }
+                                }
                             }
-
-                            val finalUrl = resolveWrapper(m.url)
-                            if (finalUrl == null) { BCLog.d("unresolved: ${m.mirror}"); return@withPermit }
-                            if (prefilter && !isHubcloudAlive(finalUrl)) {
-                                BCLog.d("prefilter drop: ${m.mirror}"); return@withPermit
-                            }
-                            VCloud(m.source, m.mirror, m.quality).getUrl(finalUrl, "", subtitleCallback, callback)
                         } catch (e: Exception) {
                             BCLog.e("${m.mirror} failed: ${e.message}")
+                            emptyList()
                         }
                     }
                 }
             }.awaitAll()
         }
-        BCLog.d("loadLinks done")
 
-        // After current episode is fully resolved, silently prefetch the next one
+        perMirror.flatten().forEach { callback.invoke(it) }
+        BCLog.d("loadLinks done (${perMirror.flatten().size} links)")
+
         if (Settings.isPrefetchEnabled() && query.type == "series"
             && query.nextSeason > 0 && query.nextEpisode > 0) {
             val nextQ = StreamQuery(
@@ -268,6 +277,14 @@ open class BingeCloudProvider : MainAPI() {
         return true
     }
 
+    private fun sourcePriority(source: String): Int = when (source) {
+        "MB" -> 0
+        "MD" -> 1
+        "VM" -> 2
+        "HDH" -> 3
+        else -> 9
+    }
+
     private fun qualityRank(q: String): Int = when {
         q.contains("2160", true) || q.contains("4k", true) -> 2160
         q.contains("1440", true) || q.contains("2k", true) -> 1440
@@ -284,9 +301,10 @@ open class BingeCloudProvider : MainAPI() {
         return when {
             l.contains("original") -> 0
             l.contains("hindi") -> 1
-            l.contains("spanish") -> 2
-            l.contains("portug") -> 3
-            else -> 4
+            l.contains("english") -> 2
+            l.contains("spanish") -> 5
+            l.contains("portug") -> 6
+            else -> 3
         }
     }
 
