@@ -272,21 +272,29 @@ suspend fun mbDetail(subjectId: String): JSONObject? =
     mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
 suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
-    val out = mutableListOf<Pair<String, String>>()
-    out.add(originalSubjectId to "Original")
-    val detail = try { mbDetail(originalSubjectId) } catch (e: Exception) { null } ?: return out
-    val dubs = detail.optJSONObject("data")?.optJSONArray("dubs") ?: return out
+    val detail = try { mbDetail(originalSubjectId) } catch (e: Exception) { null }
+    val dubs = detail?.optJSONObject("data")?.optJSONArray("dubs")
+
+    if (dubs == null || dubs.length() == 0) {
+        BCLog.d("MB langs: [Original] (no dubs array)")
+        return listOf(originalSubjectId to "Original")
+    }
+
+    var originalLabel: String? = null
+    val dubEntries = mutableListOf<Pair<String, String>>()
     for (i in 0 until dubs.length()) {
         val d = dubs.optJSONObject(i) ?: continue
         val id = d.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
         val lan = d.optString("lanName").takeIf { it.isNotBlank() } ?: continue
-        if (id == originalSubjectId) { out[0] = originalSubjectId to lan; continue }
-        out.add(id to lan)
+        if (id == originalSubjectId) { originalLabel = lan; continue }
+        dubEntries.add(id to lan)
     }
+    val out = mutableListOf<Pair<String, String>>()
+    out.add(originalSubjectId to (originalLabel ?: "Original"))
+    out.addAll(dubEntries)
     BCLog.d("MB langs: ${out.map { it.second }}")
     return out
 }
-
 suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
