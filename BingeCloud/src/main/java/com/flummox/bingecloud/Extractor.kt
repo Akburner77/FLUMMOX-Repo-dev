@@ -69,7 +69,6 @@ private val TRAILING_QUALITY_REGEX = Regex("""[\s·•\-]*\d{3,4}[pP]?\s*$""")
 private fun cleanServerName(raw: String): String =
     raw.replace(TRAILING_QUALITY_REGEX, "").trim()
 
-// ── automatic server name shortening for any provider ──
 private fun shortenServer(raw: String): String {
     val clean = cleanServerName(raw)
     if (clean.isEmpty()) return clean
@@ -92,7 +91,6 @@ private fun shortenServer(raw: String): String {
         l.contains("gofile") -> "Gofile"
         l.contains("dropbox") -> "Dropbox"
         l.contains("onedrive") -> "OneDrive"
-        // ── fallback for "Download [Tag : N]" patterns ──
         l.contains("download [") -> {
             Regex("""\[([^\]]+)\]""").find(clean)?.groupValues?.get(1)
                 ?.split(":")?.firstOrNull()?.trim()?.ifBlank { "Server" } ?: "Server"
@@ -101,7 +99,6 @@ private fun shortenServer(raw: String): String {
     }
 }
 
-// ── is a URL a direct playable file? skip extraction ──
 private fun isDirectFile(url: String): Boolean {
     val l = url.lowercase()
     return l.endsWith(".mp4") || l.endsWith(".mkv") || l.endsWith(".webm")
@@ -120,12 +117,13 @@ private fun linkTypeFor(url: String): ExtractorLinkType {
     }
 }
 
+// ── dead hosts: don't waste time on them ──
+private val DEAD_HOSTS = setOf(
+    "gdflix.dev"   // 429 rate-limited, WebView can't solve it
+)
+
 // ══════════════════════════════════════════════════════════════
 // ── VCLOUD EXTRACTOR ──
-// Handles hubcloud / gdflix / vcloud wrapper pages.
-// ── Phase 2: extractor IS the liveness check.
-// ── Fix 2: direct files skip extraction.
-// ── Fix 3: successful extractions cached 30min.
 // ══════════════════════════════════════════════════════════════
 open class VCloud(
     var sourceTag: String = "VC",
@@ -162,7 +160,13 @@ open class VCloud(
     ) {
         val startMs = System.currentTimeMillis()
 
-        // ── Fix 3: extraction cache lookup ──
+        // ── skip dead hosts ──
+        if (DEAD_HOSTS.any { url.contains(it, true) }) {
+            BCLog.d("VCloud skip dead host: ${url.take(60)}")
+            return
+        }
+
+        // ── extraction cache ──
         val cacheKey = "vcloud:${sourceTag}:${qualityLabel}:$url"
         BCCache.get(cacheKey, 30 * 60 * 1000L)?.let { cached ->
             BCLog.d("VCloud CACHE HIT: $sourceTag $qualityLabel (0ms)")
@@ -179,7 +183,7 @@ open class VCloud(
             return
         }
 
-        // ── Fix 2: direct file — no extraction needed ──
+        // ── direct file — no extraction needed ──
         if (isDirectFile(url)) {
             BCLog.d("VCloud DIRECT: $sourceTag $qualityLabel (${System.currentTimeMillis() - startMs}ms)")
             BCCache.put(cacheKey, url)
@@ -196,7 +200,6 @@ open class VCloud(
             return
         }
 
-        // ── normal extraction path ──
         val doc = cloudflareGetDoc(url) ?: return
 
         val gamerxyt = doc.selectFirst("script:containsData(hubcloud.php)")?.toString()
