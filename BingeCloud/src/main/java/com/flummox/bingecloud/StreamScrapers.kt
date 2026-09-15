@@ -394,12 +394,14 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<ScrapedMirror>>>()
 
         if (Settings.isSrcVm()) jobs.add(async {
-            try {
-                val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
-                if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
-                else vegamoviesExtractMovieRaw(page)
-            } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
-        })
+    try {
+        com.flummox.bingecore.SpeedBooster.dedupedScrape("vm:${q.cacheKey()}") {
+            val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@dedupedScrape emptyList()
+            if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
+            else vegamoviesExtractMovieRaw(page)
+        }
+    } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
+})
         if (Settings.isSrcMd()) jobs.add(async {
             try {
                 val page = moviesdriveFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
