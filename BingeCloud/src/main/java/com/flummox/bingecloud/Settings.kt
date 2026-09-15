@@ -56,6 +56,7 @@ object Settings {
     const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
+    const val K_PREFETCH = "bingecloud_prefetch"
     const val K_ROW_ORDER = "bingecloud_row_order"
     const val K_ROW_TRENDING_MOVIES = "bingecloud_row_trending_movies"
     const val K_ROW_TRENDING_SERIES = "bingecloud_row_trending_series"
@@ -160,6 +161,7 @@ object Settings {
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
+    fun isPrefetchEnabled(): Boolean = getKey<Boolean>(K_PREFETCH) ?: true
     fun isRowEnabled(key: String): Boolean =
         getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
 
@@ -661,6 +663,11 @@ object Settings {
                 ctx, "Concurrency", "Providers running in parallel",
                 1, 50, getConcurrency()
             ) { setKey(K_CONCURRENCY, it) })
+            c.body.addView(toggleRow(
+                ctx, "Smart prefetch",
+                "Pre-cache current + next episode in background",
+                isPrefetchEnabled()
+            ) { setKey(K_PREFETCH, it) })
             body.addView(c.root)
         }
 
@@ -795,9 +802,9 @@ object Settings {
         // ── Debug Logs ──
 run {
     val c = buildCard(
-        ctx, "🐞", "Debug Logs",
-        "${BCLog.count()} lines • tap ▸ to expand"
-    )
+    ctx, "🐞", "Debug Logs",
+    "Local · ${BCLog.count()} lines • tap ▸ to expand"
+)
 
     // Fixed-height scroll container. Android's nested-scroll handles
     // outer scroll automatically when this inner one hits top/bottom.
