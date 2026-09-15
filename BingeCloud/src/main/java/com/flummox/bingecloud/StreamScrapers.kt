@@ -316,9 +316,9 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
 // ═══════════════════════════════════════════
 // MovieBox
 // ═══════════════════════════════════════════
-private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
+private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = coroutineScope {
     val results = try { mbSearch(q.title) } catch (e: Exception) { emptyList() }
-    if (results.isEmpty()) return emptyList()
+    if (results.isEmpty()) return@coroutineScope emptyList()
     val expectedType = if (q.type == "series") 2 else 1
     var best: MBSubject? = null
     var bestScore = 0
@@ -329,9 +329,23 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         if (s.type == expectedType) score += 2
         if (score > bestScore) { bestScore = score; best = s }
     }
-    val subject = best ?: return emptyList()
-    val streams = try { mbPlay(subject.subjectId, q.season, q.episode) } catch (e: Exception) { emptyList() }
-    return streams.map {
+    val subject = best ?: return@coroutineScope emptyList()
+
+    // Get every available audio track (original + dubs), then fetch play-info per track in parallel
+    val languages = try { mbLanguages(subject.subjectId) } catch (e: Exception) {
+        BCLog.e("MB langs failed: ${e.message}")
+        listOf(subject.subjectId to "Original")
+    }
+
+    val allStreams = languages.map { (sid, lang) ->
+        async {
+            try { mbPlay(sid, q.season, q.episode, lang) } catch (e: Exception) { emptyList() }
+        }
+    }.awaitAll().flatten()
+
+    BCLog.d("MB total: ${allStreams.size} streams across ${languages.size} languages")
+
+    allStreams.map {
         val audioLabel = it.audio?.takeIf { a -> a.isNotBlank() }?.let { a -> " ($a Audio)" } ?: ""
         ScrapedMirror(
             quality = it.quality.ifBlank { "Auto" },
@@ -342,7 +356,6 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         )
     }
 }
-
 // ═══════════════════════════════════════════
 // Wrapper resolution
 // ═══════════════════════════════════════════
