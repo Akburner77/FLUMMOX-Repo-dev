@@ -225,80 +225,54 @@ open class BingeCloudProvider : MainAPI() {
         val concurrency = Settings.getConcurrency().coerceIn(1, 50)
         BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency)")
 
-        val sem = Semaphore(concurrency)
-
-        // ── 3. resolve in parallel — extractor success = link is alive ──
-        val perMirror: List<List<ExtractorLink>> = coroutineScope {
-            finalOrder.map { (m, score) ->
-                async {
-                    sem.withPermit {
-                        try {
-                            val emoji = LinkScore.emoji(score)
-                            if (m.source == "MB") {
-                                val linkType = when {
-                                    m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
-                                    m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
-                                    else -> ExtractorLinkType.VIDEO
-                                }
-                                val display = "$emoji${m.quality} •MB ${m.mirror}"
-                                BCLog.d("MB link: $display (score=$score)")
-                                val hdrs = m.headers
-                                val link = newExtractorLink("MovieBox", display, m.url, linkType) {
-                                    this.referer = "https://h5.aoneroom.com/"
-                                    if (hdrs != null) this.headers = hdrs
-                                }
-                                HostHealth.recordSuccess("mb.local")
-                                listOf(link)
-                            } else {
-                                // ── Phase 2: no prefilter, extractor failure = drop ──
-                                val finalUrl = resolveWrapper(m.url)
-                                if (finalUrl == null) {
-                                    BCLog.d("unresolved: ${m.mirror}")
-                                    HostHealth.recordFailure(hostOf(m.url))
-                                    emptyList()
-                                } else {
-                                    val bag = mutableListOf<ExtractorLink>()
-                                    VCloud(m.source, m.mirror, m.quality, emoji)
-                                        .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
-                                    if (bag.isEmpty()) HostHealth.recordFailure(hostOf(m.url))
-                                    else HostHealth.recordSuccess(hostOf(m.url))
-                                    bag
-                                }
-                            }
-                        } catch (e: Exception) {
-                            BCLog.e("${m.mirror} failed: ${e.message}")
-                            HostHealth.recordFailure(hostOf(m.url))
-                            emptyList()
-                        }
-                    }
-                }
-            }.awaitAll()
+        // ── 3. progressive resolve — emit each link as it finishes, return early ──
+       com.flummox.bingecore.ProgressiveResolver.run(
+       items = finalOrder,
+       concurrency = concurrency,
+       softCapMs = 2500L,
+       minBeforeReturn = 3,
+       logTag = "BingeCloud",
+       resolve = { pair ->
+        val (m, score) = pair
+        val emoji = LinkScore.emoji(score)
+        if (m.source == "MB") {
+            val linkType = when {
+                m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                else -> ExtractorLinkType.VIDEO
+            }
+            val display = "$emoji${m.quality} •MB ${m.mirror}"
+            BCLog.d("MB link: $display (score=$score)")
+            val hdrs = m.headers
+            val link = newExtractorLink("MovieBox", display, m.url, linkType) {
+                this.referer = "https://h5.aoneroom.com/"
+                if (hdrs != null) this.headers = hdrs
+            }
+            HostHealth.recordSuccess("mb.local")
+            listOf(link)
+        } else {
+            val finalUrl = resolveWrapper(m.url)
+            if (finalUrl == null) {
+                BCLog.d("unresolved: ${m.mirror}")
+                HostHealth.recordFailure(hostOf(m.url))
+                emptyList()
+            } else {
+                val bag = mutableListOf<ExtractorLink>()
+                VCloud(m.source, m.mirror, m.quality, emoji)
+                    .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
+                if (bag.isEmpty()) HostHealth.recordFailure(hostOf(m.url))
+                else HostHealth.recordSuccess(hostOf(m.url))
+                bag
+            }
         }
-
-        val allLinks = perMirror.flatten()
-        allLinks.forEach { callback.invoke(it) }
-        BCLog.d("loadLinks done (${allLinks.size} links)")
-
-        // ── 4. prefetch next episode ──
-        if (Settings.isPrefetchEnabled() && query.type == "series"
-            && query.nextSeason > 0 && query.nextEpisode > 0) {
-            val nextQ = StreamQuery(
-                query.title, query.year, "series", query.imdbId,
-                query.nextSeason, query.nextEpisode
-            )
-            val nextKey = nextQ.cacheKey()
-            if (BCCache.getMirrors(nextKey) == null) {
-                activePrefetchJob?.cancel()
-                activePrefetchJob = PREFETCH_SCOPE.launch {
-                    try {
-                        BCLog.d("smart prefetch next: S${query.nextSeason}E${query.nextEpisode}")
-                        val nextMirrors = scrapeAllSources(nextQ)
-                        BCCache.putMirrors(nextKey, nextMirrors)
-                        BCLog.d("smart prefetch next done: ${nextMirrors.size} mirrors")
-                    } catch (e: CancellationException) {
-                        BCLog.d("smart prefetch next cancelled")
-                    } catch (e: Exception) {
-                        BCLog.e("smart prefetch next failed: ${e.message}")
+    },
+           onEmit = { link -> callback.invoke(link) },
+           onFail = { pair, e ->
+        val (m, _) = pair
+           BCLog.e("${m.mirror} failed: ${e.message}")
+           HostHealth.recordFailure(hostOf(m.url))
+    }
+)
                     }
                 }
             }
