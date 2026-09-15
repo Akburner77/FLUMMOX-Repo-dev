@@ -195,8 +195,7 @@ open class BingeCloudProvider : MainAPI() {
                                     else -> ExtractorLinkType.VIDEO
                                 }
 
-                                // Diagnostic — verify cookie works via OkHttp before handing to player
-                                val cookieHeader = m.headers?.get("Cookie") ?: ""
+                                val cookieHeader: String = m.headers?.get("Cookie") ?: ""
                                 BCLog.d("MB cookie len=${cookieHeader.length} url=${m.url.take(120)}")
                                 try {
                                     val testRes = com.lagradost.cloudstream3.app.get(
@@ -212,6 +211,7 @@ open class BingeCloudProvider : MainAPI() {
                                     BCLog.e("MB test failed: ${e.message}")
                                 }
 
+                                val mbHeaders: Map<String, String>? = m.headers
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "MovieBox",
@@ -222,7 +222,7 @@ open class BingeCloudProvider : MainAPI() {
                                         this.referer = "https://h5.aoneroom.com/"
                                         this.quality = qualityRank(m.quality)
                                             .takeIf { it > 0 } ?: Qualities.Unknown.value
-                                        m.headers?.forEach { (k, v) -> this.headers[k] = v }
+                                        if (mbHeaders != null) this.headers = mbHeaders
                                     }
                                 )
                                 return@withPermit
