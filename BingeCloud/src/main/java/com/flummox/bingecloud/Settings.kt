@@ -802,40 +802,45 @@ object Settings {
         // ── Debug Logs ──
 run {
     val c = buildCard(
-    ctx, "🐞", "Debug Logs",
-    "Local · ${BCLog.count()} lines • tap ▸ to expand"
-)
+        ctx, "🐞", "Debug Logs",
+        "Local · ${BCLog.count()} lines • tap ▸ to expand"
+    )
 
-    // Fixed-height scroll container. Android's nested-scroll handles
-    // outer scroll automatically when this inner one hits top/bottom.
     val logView = TextView(ctx).apply {
         typeface = Typeface.MONOSPACE
         textSize = 10f
         setTextColor(LOG_TEXT)
-        background = bg(INPUT, 8, ctx)
         setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
         setTextIsSelectable(false)
         text = BCLog.allSanitized()
     }
 
     val logScroll = ScrollView(ctx).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 260)
-        ).apply {
-            leftMargin = dp(ctx, 8)
-            rightMargin = dp(ctx, 8)
-            bottomMargin = dp(ctx, 6)
-        }
         background = bg(INPUT, 8, ctx)
-        isVerticalScrollBarEnabled = true
-        isScrollbarFadingEnabled = false
-        scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+        isVerticalScrollBarEnabled = false
         isFillViewport = false
     }
     logScroll.addView(logView, ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
     ))
     logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+
+    val logScrollbar = LogScrollbar(ctx, logScroll, trackColor = INPUT, thumbColor = ACCENT_STRONG)
+
+    val logRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 320)
+        ).apply {
+            leftMargin = dp(ctx, 8)
+            rightMargin = dp(ctx, 8)
+            bottomMargin = dp(ctx, 6)
+        }
+    }
+    logRow.addView(logScroll, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+    logRow.addView(logScrollbar, LinearLayout.LayoutParams(dp(ctx, 14), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+        leftMargin = dp(ctx, 4)
+    })
 
     val btnRow = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -870,18 +875,14 @@ run {
                 val values = android.content.ContentValues().apply {
                     put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fname)
                     put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                    put(
-                        android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                        android.os.Environment.DIRECTORY_DOWNLOADS
-                    )
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS)
                 }
                 val uri = ctx.contentResolver.insert(
                     android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
                 )
                 uri?.let {
-                    ctx.contentResolver.openOutputStream(it)?.use { os ->
-                        os.write(content.toByteArray())
-                    }
+                    ctx.contentResolver.openOutputStream(it)?.use { os -> os.write(content.toByteArray()) }
                     Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
                 } ?: Toast.makeText(ctx, "Save failed", Toast.LENGTH_SHORT).show()
             } else {
@@ -905,7 +906,7 @@ run {
         logView.text = "(cleared)"
     })
 
-    c.body.addView(logScroll)
+    c.body.addView(logRow)
     c.body.addView(btnRow)
     body.addView(c.root)
 }
