@@ -97,8 +97,8 @@ object Settings {
     val ALL_ROWS: List<RowSpec> = listOf(
         RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", null, "TMDB"),
         RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", null, "TMDB"),
-        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.top", "Popular Movies", null, "TMDB"),
-        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.top", "Popular Series", null, "TMDB"),
+        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.trending", "Popular Movies", null, "TMDB"),
+        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.trending", "Popular Series", null, "TMDB"),
         RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "Hindi", "TMDB • Hindi"),
         RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "Hindi", "TMDB • Hindi"),
         RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
