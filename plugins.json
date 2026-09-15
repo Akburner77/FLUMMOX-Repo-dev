@@ -10,11 +10,13 @@
       "FlummoxGamer"
     ],
     "tvTypes": [
-      "All in one Extension"
+      "Movies",
+      "TV Series",
+      "Anime"
     ],
     "version": 175,
     "internalName": "BingeCloud",
-    "description": "BingeCloud - Movies & TV Series",
+    "description": "BingeCloud - TV Series, Movies, Anime",
     "url": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds-dev/BingeCloud.cs3",
     "name": "BingeCloud"
   }
