@@ -13,7 +13,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
 // ─────────────────────────────────────────
-//  Constants — verified from phisher98 build
+//  Constants
 // ─────────────────────────────────────────
 private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
 private const val MB_SECRET_ALT_B64 = "XQn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
@@ -227,13 +227,12 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
 //  Public API
 // ─────────────────────────────────────────
 data class MBSubject(val subjectId: String, val title: String, val year: Int?, val type: Int)
-data class MBStream(val url: String, val quality: String, val size: String?)
+data class MBStream(val url: String, val quality: String, val size: String?, val signCookie: String? = null)
 
 suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     val session = ensureSession() ?: run {
         BCLog.e("MB: no session for search"); return emptyList()
     }
-    // Body format must match phisher's byte-for-byte — spaces matter for MD5
     val jsonBody = "{\"page\": $page, \"perPage\": 20, \"keyword\": \"$query\", \"restrictKid\": 1}"
     BCLog.d("MB search body: $jsonBody")
 
@@ -256,7 +255,7 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
             BCLog.d("MB POST search $host -> ${res.code}")
             if (res.code !in 200..299) {
                 BCLog.d("MB body: ${res.text.take(300)}")
-                if ((res.code == 401 || res.code == 403)) {
+                if (res.code == 401 || res.code == 403) {
                     mbSession = null
                     return mbSearch(query, page)
                 }
@@ -306,9 +305,14 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<M
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
-        val quality = o.optString("quality").ifBlank { o.optString("resolution").ifBlank { "Auto" } }
+        val resolutionsStr = o.optString("resolutions").ifBlank { null }
+        val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
+            if (it.toIntOrNull() != null) "${it}p" else it
+        } ?: o.optString("quality").ifBlank { "Auto" }
         val size = o.optString("size").ifBlank { null }
-        out.add(MBStream(url, quality, size))
+        val signCookie = o.optString("signCookie").ifBlank { null }
+        out.add(MBStream(url, quality, size, signCookie))
     }
+    BCLog.d("MB play: ${out.size} streams")
     return out
 }
