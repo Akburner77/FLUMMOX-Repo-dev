@@ -89,16 +89,16 @@ object Settings {
         RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", null, "TMDB"),
         RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.top", "Popular Movies", null, "TMDB"),
         RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.top", "Popular Series", null, "TMDB"),
-        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "hi", "TMDB • Hindi"),
-        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "hi", "TMDB • Hindi"),
-        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "Action", "TVDB"),
+        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "language=hi", "TMDB • Hindi"),
+        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "language=hi", "TMDB • Hindi"),
+        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "genre=Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "genre=Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "genre=Action", "TVDB"),
         RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
         RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
         RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
-        RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "Monday", "MAL"),
+        RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "day=Monday", "MAL"),
         RowSpec(K_ROW_TOP_ANIME_MOVIES, "anime", "mal.top_movies", "Top Anime Movies", null, "MAL"),
         RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
         RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
@@ -134,7 +134,7 @@ object Settings {
         setKey(K_ROW_ORDER, order.joinToString("|"))
     }
 
-    fun getRowSpecByKey(key: String): RowSpec? = ALL_ROWS.firstOrNull { it.key == key }
+    fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 50).coerceIn(1, 50)
 
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 15).coerceIn(1, 50)
     fun getCfDomains(): List<String> =
