@@ -3,9 +3,15 @@ package com.flummox.bingecloud
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
@@ -13,6 +19,12 @@ import java.util.Calendar
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
+
+private val PREFETCH_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+private var activePrefetchJob: Job? = null
+
+private fun StreamQuery.cacheKey(): String =
+    "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
 open class BingeCloudProvider : MainAPI() {
     override var mainUrl = AIOMETA_BASE
@@ -90,6 +102,39 @@ open class BingeCloudProvider : MainAPI() {
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
+        // Prefetch first episode (series) or movie itself
+        if (Settings.isPrefetchEnabled()) {
+            val prefetchQuery: StreamQuery? = when {
+                tvType == TvType.Movie -> StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
+                videos.isNotEmpty() -> {
+                    val first = videos.firstOrNull()
+                    val s = first?.season
+                    val e = first?.episode
+                    if (s != null && e != null) StreamQuery(name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "", s, e)
+                    else null
+                }
+                else -> null
+            }
+            if (prefetchQuery != null) {
+                val key = prefetchQuery.cacheKey()
+                if (BCCache.getMirrors(key) == null) {
+                    activePrefetchJob?.cancel()
+                    activePrefetchJob = PREFETCH_SCOPE.launch {
+                        try {
+                            BCLog.d("smart prefetch: ${prefetchQuery.title} S${prefetchQuery.season}E${prefetchQuery.episode}")
+                            val mirrors = scrapeAllSources(prefetchQuery)
+                            BCCache.putMirrors(key, mirrors)
+                            BCLog.d("smart prefetch done: ${mirrors.size} mirrors")
+                        } catch (e: CancellationException) {
+                            BCLog.d("smart prefetch cancelled")
+                        } catch (e: Exception) {
+                            BCLog.e("smart prefetch failed: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+
         return if (tvType == TvType.Movie && videos.isEmpty()) {
             val q = StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
             newMovieLoadResponse(name, url, TvType.Movie, encodeQuery(q)) {
@@ -102,10 +147,15 @@ open class BingeCloudProvider : MainAPI() {
                 if (actors.isNotEmpty()) addActors(actors)
             }
         } else {
-            val episodes = videos.mapNotNull { v ->
-                val s = v.season ?: return@mapNotNull null
-                val e = v.episode ?: return@mapNotNull null
-                val q = StreamQuery(name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "", s, e)
+            val episodes = videos.mapIndexedNotNull { idx, v ->
+                val s = v.season ?: return@mapIndexedNotNull null
+                val e = v.episode ?: return@mapIndexedNotNull null
+                val next = videos.getOrNull(idx + 1)
+                val q = StreamQuery(
+                    name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "",
+                    s, e,
+                    next?.season ?: 0, next?.episode ?: 0
+                )
                 newEpisode(encodeQuery(q)) {
                     this.name = v.title ?: "Episode $e"
                     this.season = s
@@ -135,7 +185,9 @@ open class BingeCloudProvider : MainAPI() {
         val query = decodeQuery(data) ?: return false
         BCLog.section("loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
 
-        val mirrors = scrapeAllSources(query)
+        val cached = BCCache.getMirrors(query.cacheKey())
+        val mirrors = cached ?: scrapeAllSources(query)
+        if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
         if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
         val pref = Settings.getQualityPref()
@@ -188,6 +240,31 @@ open class BingeCloudProvider : MainAPI() {
             }.awaitAll()
         }
         BCLog.d("loadLinks done")
+
+        // After current episode is fully resolved, silently prefetch the next one
+        if (Settings.isPrefetchEnabled() && query.type == "series"
+            && query.nextSeason > 0 && query.nextEpisode > 0) {
+            val nextQ = StreamQuery(
+                query.title, query.year, "series", query.imdbId,
+                query.nextSeason, query.nextEpisode
+            )
+            val nextKey = nextQ.cacheKey()
+            if (BCCache.getMirrors(nextKey) == null) {
+                activePrefetchJob?.cancel()
+                activePrefetchJob = PREFETCH_SCOPE.launch {
+                    try {
+                        BCLog.d("smart prefetch next: S${query.nextSeason}E${query.nextEpisode}")
+                        val nextMirrors = scrapeAllSources(nextQ)
+                        BCCache.putMirrors(nextKey, nextMirrors)
+                        BCLog.d("smart prefetch next done: ${nextMirrors.size} mirrors")
+                    } catch (e: CancellationException) {
+                        BCLog.d("smart prefetch next cancelled")
+                    } catch (e: Exception) {
+                        BCLog.e("smart prefetch next failed: ${e.message}")
+                    }
+                }
+            }
+        }
         return true
     }
 
@@ -231,6 +308,7 @@ private fun encodeQuery(q: StreamQuery): String {
     val o = JSONObject()
     o.put("t", q.title); o.put("y", q.year); o.put("ty", q.type)
     o.put("s", q.season); o.put("e", q.episode); o.put("i", q.imdbId)
+    o.put("ns", q.nextSeason); o.put("ne", q.nextEpisode)
     return o.toString()
 }
 
@@ -239,6 +317,7 @@ private fun decodeQuery(s: String): StreamQuery? = try {
     StreamQuery(
         o.optString("t"), o.optString("y"),
         o.optString("ty", "movie"), o.optString("i"),
-        o.optInt("s", 0), o.optInt("e", 0)
+        o.optInt("s", 0), o.optInt("e", 0),
+        o.optInt("ns", 0), o.optInt("ne", 0)
     )
 } catch (e: Exception) { null }
