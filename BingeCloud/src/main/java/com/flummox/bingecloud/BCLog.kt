@@ -8,6 +8,7 @@ import java.util.Locale
 /**
  * In-memory ring buffer logger for BingeCloud.
  * Keeps the last 800 lines, thread-safe, shown in Settings → Debug Logs.
+ * Tokens, cookies, JWTs are stripped by allSanitized() before display/share/save.
  */
 object BCLog {
 
@@ -17,6 +18,22 @@ object BCLog {
     private val buffer = ArrayDeque<String>(MAX_LINES)
     private val lock = Any()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
+
+    private val RX_JWT = Regex("""eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+""")
+    private val RX_BEARER = Regex("""(?i)(bearer\s+)\S+""")
+    private val RX_SIGN_COOKIE = Regex("""(?i)("signCookie"\s*:\s*")[^"]+""")
+    private val RX_COOKIE = Regex("""(?i)(cookie["']?\s*[:=]\s*["']?)[^"\r\n]+""")
+    private val RX_CF = Regex("""(?i)(cloudfront-(?:policy|signature|key-pair-id)=)[^;&"\s]+""")
+
+    private fun sanitize(input: String): String {
+        var s = input
+        s = RX_JWT.replace(s) { "<JWT>" }
+        s = RX_BEARER.replace(s) { m -> m.groupValues[1] + "<BEARER>" }
+        s = RX_SIGN_COOKIE.replace(s) { m -> m.groupValues[1] + "<COOKIE>" }
+        s = RX_COOKIE.replace(s) { m -> m.groupValues[1] + "<COOKIE>" }
+        s = RX_CF.replace(s) { m -> m.groupValues[1] + "<CF>" }
+        return s
+    }
 
     fun d(message: String) {
         val line = "[${timeFormat.format(Date())}] $message"
@@ -45,11 +62,14 @@ object BCLog {
         Log.d(TAG, line)
     }
 
-    /** Returns the entire log, newest last. */
+    /** Raw — internal use only. */
     fun all(): String = synchronized(lock) {
         if (buffer.isEmpty()) "(no logs yet)"
         else buffer.joinToString("\n")
     }
+
+    /** Sanitized — safe for display, copy, share, save. */
+    fun allSanitized(): String = sanitize(all())
 
     fun count(): Int = synchronized(lock) { buffer.size }
 
