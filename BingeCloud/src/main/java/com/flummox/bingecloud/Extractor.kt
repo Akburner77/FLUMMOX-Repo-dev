@@ -1,19 +1,7 @@
 /*
  * FLUMMOX Repo — CloudStream 3 Extension Repository
  * Copyright (C) 2026 FlummoxGamer
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * GPL-3.0-or-later
  */
 
 package com.flummox.bingecloud
@@ -25,19 +13,11 @@ import com.lagradost.cloudstream3.utils.*
 import java.net.URI
 
 fun base64Decode(str: String): String {
-    return try {
-        String(Base64.decode(str, Base64.DEFAULT))
-    } catch (e: Exception) {
-        ""
-    }
+    return try { String(Base64.decode(str, Base64.DEFAULT)) } catch (e: Exception) { "" }
 }
 
 fun getBaseUrl(url: String): String {
-    return try {
-        URI(url).let { "${it.scheme}://${it.host}" }
-    } catch (e: Exception) {
-        url
-    }
+    return try { URI(url).let { "${it.scheme}://${it.host}" } } catch (e: Exception) { url }
 }
 
 fun getIndexQuality(str: String?): Int {
@@ -57,9 +37,7 @@ suspend fun getLatestBaseUrl(baseUrl: String, source: String): String {
         val dynamicUrls = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json")
             .parsedSafe<Map<String, String>>()
         dynamicUrls?.get(source)?.takeIf { it.isNotBlank() } ?: baseUrl
-    } catch (e: Exception) {
-        baseUrl
-    }
+    } catch (e: Exception) { baseUrl }
 }
 
 suspend fun resolveFinalUrl(startUrl: String): String? {
@@ -73,13 +51,9 @@ suspend fun resolveFinalUrl(startUrl: String): String? {
                 val location = res.headers["Location"]
                 if (location.isNullOrEmpty()) break
                 currentUrl = location
-            } else {
-                return null
-            }
+            } else return null
             loopCount++
-        } catch (e: Exception) {
-            return null
-        }
+        } catch (e: Exception) { return null }
     }
     return currentUrl
 }
@@ -89,10 +63,25 @@ private val TRAILING_QUALITY_REGEX = Regex("""[\s·•\-]*\d{3,4}[pP]?\s*$""")
 private fun cleanServerName(raw: String): String =
     raw.replace(TRAILING_QUALITY_REGEX, "").trim()
 
-/**
- * VCloud / HubCloud / GDFlix extractor.
- * Display name format: "{Quality} •{SOURCE} {ServerName}" e.g. "1080p •MD HubCloud"
- */
+private fun shortenServer(raw: String): String {
+    val clean = cleanServerName(raw)
+    if (clean.isEmpty()) return clean
+    val l = clean.lowercase()
+    return when {
+        l.contains("hubcloud") -> "HCloud"
+        l.contains("gdflix") -> "GDFlix"
+        l.contains("vcloud") -> "VCloud"
+        l.contains("vega") -> "Vega"
+        l.contains("hdhub4u") || l.contains("hdhub") -> "HDhub"
+        l.contains("fsl") -> "FSL"
+        l.contains("pixeldrain") -> "Pixel"
+        l.contains("gdirect") -> "GDrive"
+        l.contains("gdrive") || l.contains("google drive") -> "GDrive"
+        l.contains("filepress") -> "FPress"
+        else -> clean
+    }
+}
+
 open class VCloud(
     var sourceTag: String = "VC",
     var mirrorLabel: String = "",
@@ -102,11 +91,11 @@ open class VCloud(
     override val mainUrl: String = "https://vcloud.*"
     override val requiresReferer = false
 
-    private fun displayName(fallbackServer: String): String {
+    private fun displayName(subServer: String): String {
         val q = qualityLabel.ifBlank { "Auto" }
-        val candidate = mirrorLabel.ifBlank { fallbackServer }
-        val cleaned = cleanServerName(candidate).ifBlank { "VCloud" }
-        return "$q •$sourceTag $cleaned"
+        val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
+        val s = shortenServer(raw).ifBlank { "VCloud" }
+        return "$q •$sourceTag $s"
     }
 
     fun extractPxlUrl(html: String): String? {
@@ -116,9 +105,7 @@ open class VCloud(
 
     fun extractDoubleAtob(html: String): String? {
         val regex = Regex("""var\s+url\s*=\s*atob\s*\(\s*atob\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\)""")
-        return regex.find(html)?.groupValues?.get(1)?.let {
-            base64Decode(base64Decode(it))
-        }
+        return regex.find(html)?.groupValues?.get(1)?.let { base64Decode(base64Decode(it)) }
     }
 
     override suspend fun getUrl(
@@ -141,11 +128,13 @@ open class VCloud(
                     (href.contains("cloudflarestorage", true) || href.contains("r2.dev", true) ||
                      href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
                      href.contains("busycdn", true) || href.contains("video-downloads", true))) {
-                    val serverName = a.text().ifBlank { "HubCloud" }.trim()
+                    val subServer = a.text().ifBlank { "HubCloud" }.trim()
+                    val display = displayName(subServer)
+                    BCLog.d("VCloud OK: $display")
                     callback.invoke(
                         newExtractorLink(
                             source = name,
-                            name = displayName(serverName),
+                            name = display,
                             url = href,
                             type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                         ) {
@@ -161,12 +150,17 @@ open class VCloud(
         val scriptTag = doc.selectFirst("script:containsData(url)")?.toString() ?: ""
         val link = if (url.contains("vcloud", true)) extractDoubleAtob(scriptTag) ?: ""
             else Regex("var url = '([^']*)'").find(scriptTag)?.groupValues?.get(1) ?: ""
-        if (link.isEmpty()) return
+        if (link.isEmpty()) {
+            BCLog.d("VCloud no-match: $sourceTag $qualityLabel ${url.take(80)}")
+            return
+        }
         val resolved = if (!link.startsWith("http")) getBaseUrl(url) + link else link
+        val display = displayName("VCloud")
+        BCLog.d("VCloud OK: $display")
         callback.invoke(
             newExtractorLink(
                 source = name,
-                name = displayName("VCloud"),
+                name = display,
                 url = resolved,
                 type = ExtractorLinkType.VIDEO
             ) {
@@ -189,36 +183,21 @@ open class GDirect : ExtractorApi() {
             Regex("""/d/([a-zA-Z0-9_-]+)"""),
             Regex("""^([a-zA-Z0-9_-]{25,})$""")
         )
-        for (p in patterns) {
-            p.find(url)?.groupValues?.getOrNull(1)?.let { return it }
-        }
+        for (p in patterns) p.find(url)?.groupValues?.getOrNull(1)?.let { return it }
         return null
     }
 
-    override suspend fun getUrl(
-        url: String,
-        referer: String?,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
+    override suspend fun getUrl(url: String, referer: String?,
+                                subtitleCallback: (SubtitleFile) -> Unit,
+                                callback: (ExtractorLink) -> Unit) {
         val finalUrl = resolveFinalUrl(url) ?: url
         val driveId = extractDriveId(finalUrl) ?: extractDriveId(url)
-        if (driveId == null) {
-            Log.e("BingeCloud", "G-Direct: no Drive ID")
-            return
-        }
+        if (driveId == null) { Log.e("BingeCloud", "G-Direct: no Drive ID"); return }
         val directUrl = "https://drive.google.com/uc?export=download&id=$driveId&confirm=t"
-        callback.invoke(
-            newExtractorLink(
-                source = name,
-                name = "$name (Drive)",
-                url = directUrl,
-                type = ExtractorLinkType.VIDEO
-            ) {
-                this.referer = "https://drive.google.com/"
-                this.quality = Qualities.Unknown.value
-            }
-        )
+        callback.invoke(newExtractorLink(name, "$name (Drive)", directUrl, ExtractorLinkType.VIDEO) {
+            this.referer = "https://drive.google.com/"
+            this.quality = Qualities.Unknown.value
+        })
     }
 }
 
@@ -227,12 +206,9 @@ open class Filepress : ExtractorApi() {
     override val mainUrl = "https://filepress.*"
     override val requiresReferer = false
 
-    override suspend fun getUrl(
-        url: String,
-        referer: String?,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
+    override suspend fun getUrl(url: String, referer: String?,
+                                subtitleCallback: (SubtitleFile) -> Unit,
+                                callback: (ExtractorLink) -> Unit) {
         try {
             val doc = app.get(url).document
             val rows = doc.select("tr, .file-row, .list-group-item")
@@ -244,17 +220,10 @@ open class Filepress : ExtractorApi() {
                     if (href.contains("gdflix", true) && href != url) {
                         getUrl(href, url, subtitleCallback, callback)
                     } else {
-                        callback.invoke(
-                            newExtractorLink(
-                                source = name,
-                                name = "$name ${row.text().take(40)}",
-                                url = href,
-                                type = ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = url
-                                this.quality = Qualities.Unknown.value
-                            }
-                        )
+                        callback.invoke(newExtractorLink(name, "$name ${row.text().take(40)}", href, ExtractorLinkType.VIDEO) {
+                            this.referer = url
+                            this.quality = Qualities.Unknown.value
+                        })
                     }
                 }
             }
@@ -262,12 +231,10 @@ open class Filepress : ExtractorApi() {
             for (a in directLinks) {
                 val href = a.attr("href")
                 if (href.startsWith("http")) {
-                    callback.invoke(
-                        newExtractorLink(name, name, href, ExtractorLinkType.VIDEO) {
-                            this.referer = url
-                            this.quality = Qualities.Unknown.value
-                        }
-                    )
+                    callback.invoke(newExtractorLink(name, name, href, ExtractorLinkType.VIDEO) {
+                        this.referer = url
+                        this.quality = Qualities.Unknown.value
+                    })
                 }
             }
         } catch (e: Exception) {
