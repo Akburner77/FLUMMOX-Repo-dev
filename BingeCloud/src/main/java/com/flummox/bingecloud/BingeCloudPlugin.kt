@@ -19,6 +19,7 @@ class BingeCloudPlugin : Plugin() {
         BCLog.init(context)
         HostHealth.init(context)
         BCLog.section("BingeCloud boot")
+        com.flummox.bingecore.Prewarm.fire()
         BCLog.d("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
         BCLog.d("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
 
