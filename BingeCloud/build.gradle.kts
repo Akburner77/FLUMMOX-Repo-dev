@@ -29,7 +29,7 @@ cloudstream {
     description = "BingeCloud - Movies & TV Series"
     authors = listOf("FlummoxGamer")
     status = 1
-    tvTypes = listOf("Movie", "TvSeries")
+    tvTypes = listOf("All in one Extension")
     language = "en"
     iconUrl = "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/BingeCloud/icon.png"
 }
