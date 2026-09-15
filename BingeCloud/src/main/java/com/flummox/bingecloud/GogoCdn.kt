@@ -4,8 +4,8 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 
 // ── GogoAnime embed extractor ──
-// Handles vibeplayer / gogocdn / streamtape-ish embeds.
-// Embed page has <video src> or a packed m3u8 in JS data-sources.
+// Receives the iframe URL from the episode page.
+// Fetches the embed, finds the m3u8, emits.
 class GogoCdn : ExtractorApi() {
     override val name = "GogoCdn"
     override val mainUrl = "https://vibeplayer.site"
@@ -17,47 +17,53 @@ class GogoCdn : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val doc = app.get(url, referer = referer).document
+        val doc = try { app.get(url, referer = referer).document } catch (e: Exception) {
+            BCLog.e("GogoCdn fetch failed: ${e.message}"); return
+        }
 
         // direct <video> or <source>
         val direct = doc.selectFirst("video[src]")?.attr("src")
             ?: doc.selectFirst("source[src]")?.attr("src")
         if (!direct.isNullOrBlank()) {
-            emit(direct, referer, callback)
+            val u = if (direct.startsWith("//")) "https:$direct" else direct
+            BCLog.d("GogoCdn OK direct: ${u.take(90)}")
+            callback.invoke(
+                newExtractorLink(name, "$name HLS", u, ExtractorLinkType.M3U8) {
+                    this.referer = referer ?: mainUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
             return
         }
 
-        // JSON payload in a script: "file":"...m3u8"
         val script = doc.select("script").joinToString("\n") { it.data() }
-        val m3u8Regex = Regex(""""file"\s*:\s*"([^"]+\.m3u8[^"]*)"""")
-        m3u8Regex.find(script)?.groupValues?.getOrNull(1)?.let { link ->
-            emit(link, referer, callback)
+
+        // "file":"...m3u8"
+        val m3u8 = Regex(""""file"\s*:\s*"([^"]+\.m3u8[^"]*)"""").find(script)?.groupValues?.getOrNull(1)
+        if (!m3u8.isNullOrBlank()) {
+            BCLog.d("GogoCdn OK json: ${m3u8.take(90)}")
+            callback.invoke(
+                newExtractorLink(name, "$name HLS", m3u8, ExtractorLinkType.M3U8) {
+                    this.referer = referer ?: mainUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
             return
         }
 
-        // fallback: any m3u8 URL in the page
+        // loose scan
         val loose = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""").find(script)?.value
-        if (loose != null) {
-            emit(loose, referer, callback)
+        if (!loose.isNullOrBlank()) {
+            BCLog.d("GogoCdn OK loose: ${loose.take(90)}")
+            callback.invoke(
+                newExtractorLink(name, "$name HLS", loose, ExtractorLinkType.M3U8) {
+                    this.referer = referer ?: mainUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
             return
         }
 
         BCLog.e("GogoCdn: no m3u8 found at $url")
     }
-
-    private fun emit(link: String, referer: String?, cb: (ExtractorLink) -> Unit) {
-        val url = if (link.startsWith("//")) "https:$link" else link
-        BCLog.d("GogoCdn OK: ${url.take(90)}")
-        cb.invoke(
-            newExtractorLink(
-                source = name,
-                name = "$name HLS",
-                url = url,
-                type = ExtractorLinkType.M3U8
-            ) {
-                this.referer = referer ?: mainUrl
-                this.quality = Qualities.Unknown.value
-            }
-        )
-    }
-                              }
+                         }
