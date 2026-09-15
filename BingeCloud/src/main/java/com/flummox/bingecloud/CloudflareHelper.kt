@@ -2,13 +2,13 @@ package com.flummox.bingecloud
 
 import android.content.Context
 import android.webkit.CookieManager
-import com.lagradost.api.Log
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.network.WebViewResolver
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.net.URI
 
+// ── context holder for CF WebView ──
 object BingeCloudCtx {
     var context: Context? = null
 }
@@ -28,14 +28,18 @@ private val CF_INDICATORS = listOf(
     "challenges.cloudflare.com"
 )
 
+// ── challenge detection ──
 private fun isChallenge(html: String): Boolean {
     val lower = html.lowercase()
     return CF_INDICATORS.any { lower.contains(it) }
 }
 
+// ── main CF-aware GET ──
 suspend fun cloudflareGet(url: String, referer: String? = null): String? {
-    // Try stored per-domain cookies first
+    val startMs = System.currentTimeMillis()
     val domain = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
+
+    // ── 1. try stored per-domain cookie ──
     val storedCookie = if (domain.isNotEmpty()) Settings.getCookieForDomain(domain) else null
     if (!storedCookie.isNullOrBlank()) {
         try {
@@ -47,14 +51,14 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
             if (res.code in 200..299) {
                 val text = res.text
                 if (!isChallenge(text)) {
-                    Log.d("BingeCloud", "stored cookie worked for $domain")
+                    BCLog.d("[CF] stored cookie worked for $domain (${System.currentTimeMillis() - startMs}ms)")
                     return text
                 }
             }
         } catch (_: Exception) {}
     }
 
-    // Fast path — plain HTTP GET
+    // ── 2. fast plain HTTP GET ──
     try {
         val res = app.get(
             url,
@@ -63,21 +67,28 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         )
         if (res.code in 200..299) {
             val text = res.text
-            if (!isChallenge(text)) return text
-            Log.d("BingeCloud", "CF challenge on $url — auto-resolving")
+            if (!isChallenge(text)) {
+                BCLog.d("[CF] plain GET ok for $domain (${System.currentTimeMillis() - startMs}ms)")
+                return text
+            }
+            BCLog.d("[CF] challenge detected on $domain — starting WebView (${System.currentTimeMillis() - startMs}ms)")
         } else {
-            Log.d("BingeCloud", "GET $url returned ${res.code}")
+            BCLog.d("[CF] plain GET returned ${res.code} for $domain")
         }
     } catch (e: Exception) {
-        Log.w("BingeCloud", "plain GET threw for $url: ${e.message}")
+        BCLog.d("[CF] plain GET threw for $domain: ${e.message}")
     }
 
-    // Auto WebView
+    // ── 3. WebView fallback (SLOW — this is the 5-20s killer) ──
+    val wvStart = System.currentTimeMillis()
     val cookies = resolveWithWebView(url)
+    val wvDuration = System.currentTimeMillis() - wvStart
     if (cookies.isNullOrBlank()) {
-        Log.e("BingeCloud", "WebView returned no cookies for $url")
+        BCLog.e("[CF] WebView returned no cookies for $domain (took ${wvDuration}ms)")
         return null
     }
+    BCLog.d("[CF] WebView resolved for $domain in ${wvDuration}ms (cookie len=${cookies.length})")
+
     return try {
         val res = app.get(
             url,
@@ -86,7 +97,7 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         )
         res.text
     } catch (e: Exception) {
-        Log.e("BingeCloud", "post-WebView GET failed for $url: ${e.message}")
+        BCLog.e("[CF] post-WebView GET failed for $domain: ${e.message}")
         null
     }
 }
@@ -96,6 +107,7 @@ suspend fun cloudflareGetDoc(url: String, referer: String? = null): Document? {
     return Jsoup.parse(html, url)
 }
 
+// ── WebView-based cookie acquisition ──
 private suspend fun resolveWithWebView(url: String): String? {
     return try {
         val host = try {
@@ -123,15 +135,15 @@ private suspend fun resolveWithWebView(url: String): String? {
         var cookies = finalRequest?.header("Cookie")
             ?: additional.firstOrNull()?.header("Cookie")
 
-        // Fallback — read directly from WebView CookieManager
+        // ── fallback: read directly from WebView CookieManager ──
         if (cookies.isNullOrBlank()) {
             cookies = CookieManager.getInstance().getCookie(url)
         }
 
-        Log.d("BingeCloud", "WebView resolved — cookie len=${cookies?.length ?: 0}")
+        BCLog.d("[CF] WebView cookie len=${cookies?.length ?: 0}")
         cookies
     } catch (e: Exception) {
-        Log.e("BingeCloud", "WebViewResolver failed: ${e.message}")
+        BCLog.e("[CF] WebViewResolver failed: ${e.message}")
         null
     }
 }

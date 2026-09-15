@@ -29,9 +29,23 @@ data class ScrapedMirror(
     val headers: Map<String, String>? = null
 )
 
+// ── 24h-cached GitHub domain resolver ──
+private const val DOMAIN_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json"
+private const val DOMAIN_CACHE_TTL = 24 * 60 * 60 * 1000L
+private val domainLock = Any()
+
 private suspend fun resolveDomain(key: String, fallback: String): String {
+    val cached = BCCache.get(DOMAIN_JSON_URL, DOMAIN_CACHE_TTL)
+    if (cached != null) {
+        return try {
+            val live = JSONObject(cached).optString(key).trim()
+            if (live.startsWith("http")) live else fallback
+        } catch (_: Exception) { fallback }
+    }
+
     return try {
-        val json = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json").text
+        val json = app.get(DOMAIN_JSON_URL).text
+        BCCache.put(DOMAIN_JSON_URL, json)
         val live = JSONObject(json).optString(key).trim()
         if (live.startsWith("http")) live else fallback
     } catch (e: Exception) {
@@ -43,15 +57,32 @@ private suspend fun resolveDomain(key: String, fallback: String): String {
 private fun normalize(s: String): String =
     s.lowercase().replace(Regex("""[^a-z0-9]+"""), " ").trim()
 
+// ── strip noise words so "Breaking Bad S5" matches "Breaking Bad" ──
+private fun stripQualifiers(s: String): String =
+    s.lowercase()
+        .replace(Regex("""\b(season|s)\s*\d+\b"""), "")
+        .replace(Regex("""\b(complete|web-?dl|bluray|blu-ray|hdrip|hindi|dubbed|dual|audio|episodes?|added|full|movie|series|org|dd5\.?1|hevc|x264|x265|10bit|esubs|multi)\b"""), "")
+        .replace(Regex("""\b(19|20)\d{2}\b"""), "")
+        .replace(Regex("""[^a-z0-9 ]"""), " ")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
 private fun titleMatches(a: String, b: String): Boolean {
-    val na = normalize(a)
-    val nb = normalize(b)
-    if (na.isEmpty() || nb.isEmpty()) return false
-    if (na.contains(nb) || nb.contains(na)) return true
-    val ta = na.split(" ").toSet()
-    val tb = nb.split(" ").toSet()
+    val sa = stripQualifiers(a)
+    val sb = stripQualifiers(b)
+    if (sa.isEmpty() || sb.isEmpty()) return false
+    if (sa == sb) return true
+
+    val ta = sa.split(" ").filter { it.isNotBlank() }.toSet()
+    val tb = sb.split(" ").filter { it.isNotBlank() }.toSet()
+    if (ta.size < 2 || tb.size < 2) return false
+
     val common = ta.intersect(tb)
-    return common.size >= 2 && common.size.toFloat() / maxOf(ta.size, tb.size) >= 0.6f
+    if (common.size < 2) return false
+
+    val queryInCandidate = ta.count { it in tb }.toFloat() / ta.size
+    val candidateInQuery = tb.count { it in ta }.toFloat() / tb.size
+    return queryInCandidate >= 0.75f && candidateInQuery >= 0.75f
 }
 
 private fun extractSeasons(title: String): List<Int> =
@@ -388,37 +419,53 @@ suspend fun resolveWrapper(url: String): String? {
 }
 
 // ═══════════════════════════════════════════ Entry
+private const val PER_SOURCE_TIMEOUT_MS = 6000L
+
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     BCLog.section("scrapeAllSources: ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
     return coroutineScope {
-        val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<ScrapedMirror>>>()
+        val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<ScrapedMirror>?>>()
 
         if (Settings.isSrcVm()) jobs.add(async {
-            try {
-                val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
-                if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
-                else vegamoviesExtractMovieRaw(page)
-            } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
+            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+                try {
+                    com.flummox.bingecore.SpeedBooster.deduped("vm:${q.cacheKey()}") {
+                        val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
+                        if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
+                        else vegamoviesExtractMovieRaw(page)
+                    }
+                } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
+            } ?: run { BCLog.d("VM timeout"); emptyList() }
         })
         if (Settings.isSrcMd()) jobs.add(async {
-            try {
-                val page = moviesdriveFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
-                if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
-                else moviesdriveExtractMovieRaw(page)
-            } catch (e: Exception) { BCLog.e("MD task failed: ${e.message}"); emptyList() }
+            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+                try {
+                    com.flummox.bingecore.SpeedBooster.deduped("md:${q.cacheKey()}") {
+                        val page = moviesdriveFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
+                        if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
+                        else moviesdriveExtractMovieRaw(page)
+                    }
+                } catch (e: Exception) { BCLog.e("MD task failed: ${e.message}"); emptyList() }
+            } ?: run { BCLog.d("MD timeout"); emptyList() }
         })
         if (Settings.isSrcHdh()) jobs.add(async {
-            try {
-                val page = hdhub4uFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
-                hdhub4uExtractRaw(page)
-            } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
+            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+                try {
+                    com.flummox.bingecore.SpeedBooster.deduped("hdh:${q.cacheKey()}") {
+                        val page = hdhub4uFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
+                        hdhub4uExtractRaw(page)
+                    }
+                } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
+            } ?: run { BCLog.d("HDH timeout"); emptyList() }
         })
         if (Settings.isSrcMovieBox()) jobs.add(async {
-            try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+                try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+            } ?: run { BCLog.d("MB timeout"); emptyList() }
         })
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
-        val all = jobs.awaitAll().flatten()
+        val all = jobs.awaitAll().filterNotNull().flatten()
         val vm = all.count { it.source == "VM" }
         val md = all.count { it.source == "MD" }
         val hdh = all.count { it.source == "HDH" }

@@ -12,6 +12,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import java.net.URI
 
+// ══════════════════════════════════════════════════════════════
+// ── UTIL ──
+// ══════════════════════════════════════════════════════════════
 fun base64Decode(str: String): String {
     return try { String(Base64.decode(str, Base64.DEFAULT)) } catch (e: Exception) { "" }
 }
@@ -58,12 +61,14 @@ suspend fun resolveFinalUrl(startUrl: String): String? {
     return currentUrl
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── SERVER NAME SHORTENING ──
+// ══════════════════════════════════════════════════════════════
 private val TRAILING_QUALITY_REGEX = Regex("""[\s·•\-]*\d{3,4}[pP]?\s*$""")
 
 private fun cleanServerName(raw: String): String =
     raw.replace(TRAILING_QUALITY_REGEX, "").trim()
 
-// ── automatic server name shortening for any provider ──
 private fun shortenServer(raw: String): String {
     val clean = cleanServerName(raw)
     if (clean.isEmpty()) return clean
@@ -86,7 +91,6 @@ private fun shortenServer(raw: String): String {
         l.contains("gofile") -> "Gofile"
         l.contains("dropbox") -> "Dropbox"
         l.contains("onedrive") -> "OneDrive"
-        // ── fallback for "Download [Tag : N]" patterns ──
         l.contains("download [") -> {
             Regex("""\[([^\]]+)\]""").find(clean)?.groupValues?.get(1)
                 ?.split(":")?.firstOrNull()?.trim()?.ifBlank { "Server" } ?: "Server"
@@ -95,6 +99,32 @@ private fun shortenServer(raw: String): String {
     }
 }
 
+private fun isDirectFile(url: String): Boolean {
+    val l = url.lowercase()
+    return l.endsWith(".mp4") || l.endsWith(".mkv") || l.endsWith(".webm")
+        || l.endsWith(".m3u8") || l.contains(".m3u8?")
+        || l.endsWith(".mpd") || l.contains(".mpd?")
+        || l.contains("cloudflarestorage.com")
+        || l.contains("r2.dev")
+}
+
+private fun linkTypeFor(url: String): ExtractorLinkType {
+    val l = url.lowercase()
+    return when {
+        l.contains(".m3u8") -> ExtractorLinkType.M3U8
+        l.contains(".mpd") -> ExtractorLinkType.DASH
+        else -> ExtractorLinkType.VIDEO
+    }
+}
+
+// ── dead hosts: don't waste time on them ──
+private val DEAD_HOSTS = setOf(
+    "gdflix.dev"
+)
+
+// ══════════════════════════════════════════════════════════════
+// ── VCLOUD EXTRACTOR ──
+// ══════════════════════════════════════════════════════════════
 open class VCloud(
     var sourceTag: String = "VC",
     var mirrorLabel: String = "",
@@ -106,10 +136,10 @@ open class VCloud(
     override val requiresReferer = false
 
     private fun displayName(subServer: String): String {
-    val q = qualityLabel.ifBlank { "Auto" }
-    val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
-    val s = shortenServer(raw).ifBlank { "VCloud" }
-    return "$emojiPrefix$q •$sourceTag $s"
+        val q = qualityLabel.ifBlank { "Auto" }
+        val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
+        val s = shortenServer(raw).ifBlank { "VCloud" }
+        return "$emojiPrefix$q •$sourceTag $s"
     }
 
     fun extractPxlUrl(html: String): String? {
@@ -128,6 +158,48 @@ open class VCloud(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
+        val startMs = System.currentTimeMillis()
+
+        // ── skip dead hosts ──
+        if (DEAD_HOSTS.any { url.contains(it, true) }) {
+            BCLog.d("VCloud skip dead host: ${url.take(60)}")
+            return
+        }
+
+        // ── extraction cache: 6 hours ──
+        val cacheKey = "vcloud:${sourceTag}:${qualityLabel}:$url"
+        BCCache.get(cacheKey, 6 * 60 * 60 * 1000L)?.let { cached ->
+            BCLog.d("VCloud CACHE HIT: $sourceTag $qualityLabel (0ms)")
+            callback.invoke(
+                newExtractorLink(
+                    source = name,
+                    name = displayName(mirrorLabel),
+                    url = cached,
+                    type = linkTypeFor(cached)
+                ) {
+                    this.referer = "https://hubcloud.ist/"
+                }
+            )
+            return
+        }
+
+        // ── direct file — no extraction needed ──
+        if (isDirectFile(url)) {
+            BCLog.d("VCloud DIRECT: $sourceTag $qualityLabel (${System.currentTimeMillis() - startMs}ms)")
+            BCCache.put(cacheKey, url)
+            callback.invoke(
+                newExtractorLink(
+                    source = name,
+                    name = displayName("Direct"),
+                    url = url,
+                    type = linkTypeFor(url)
+                ) {
+                    this.referer = url
+                }
+            )
+            return
+        }
+
         val doc = cloudflareGetDoc(url) ?: return
 
         val gamerxyt = doc.selectFirst("script:containsData(hubcloud.php)")?.toString()
@@ -142,20 +214,20 @@ open class VCloud(
                     (href.contains("cloudflarestorage", true) || href.contains("r2.dev", true) ||
                      href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
                      href.contains("busycdn", true) || href.contains("video-downloads", true))) {
-                    val subServer = a.text().ifBlank { "HubCloud" }.trim()
-                    val display = displayName(subServer)
-                    BCLog.d("VCloud OK: $display")
+                    val serverName = a.text().ifBlank { "HubCloud" }.trim()
+                    val display = displayName(serverName)
+                    BCLog.d("VCloud OK: $display (${System.currentTimeMillis() - startMs}ms)")
+                    BCCache.put(cacheKey, href)
                     callback.invoke(
-                      newExtractorLink(
-                      source = name,
-                      name = display,
-                      url = href,
-                    type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                 ) {
-                   this.referer = "https://hubcloud.ist/"
-        // ── quality NOT set on ExtractorLink — picker preserves our sort order ──
-                      }
-                   )
+                        newExtractorLink(
+                            source = name,
+                            name = display,
+                            url = href,
+                            type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = "https://hubcloud.ist/"
+                        }
+                    )
                 }
             }
             return
@@ -165,26 +237,29 @@ open class VCloud(
         val link = if (url.contains("vcloud", true)) extractDoubleAtob(scriptTag) ?: ""
             else Regex("var url = '([^']*)'").find(scriptTag)?.groupValues?.get(1) ?: ""
         if (link.isEmpty()) {
-            BCLog.d("VCloud no-match: $sourceTag $qualityLabel ${url.take(80)}")
+            BCLog.d("VCloud no-match: $sourceTag $qualityLabel ${url.take(80)} (${System.currentTimeMillis() - startMs}ms)")
             return
         }
         val resolved = if (!link.startsWith("http")) getBaseUrl(url) + link else link
         val display = displayName("VCloud")
-        BCLog.d("VCloud OK: $display")
+        BCLog.d("VCloud OK: $display (${System.currentTimeMillis() - startMs}ms)")
+        BCCache.put(cacheKey, resolved)
         callback.invoke(
-           newExtractorLink(
-           source = name,
-           name = display,
-           url = resolved,
-           type = ExtractorLinkType.VIDEO
-         ) {
-        this.referer = url
-        // ── quality NOT set — picker preserves our sort order ──
-          }
-       )
+            newExtractorLink(
+                source = name,
+                name = display,
+                url = resolved,
+                type = ExtractorLinkType.VIDEO
+            ) {
+                this.referer = url
+            }
+        )
     }
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── GDIRECT EXTRACTOR (Google Drive) ──
+// ══════════════════════════════════════════════════════════════
 open class GDirect : ExtractorApi() {
     override val name = "G-Direct"
     override val mainUrl = "https://gdirect.*"
@@ -215,6 +290,9 @@ open class GDirect : ExtractorApi() {
     }
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── FILEPRESS EXTRACTOR ──
+// ══════════════════════════════════════════════════════════════
 open class Filepress : ExtractorApi() {
     override val name = "Filepress"
     override val mainUrl = "https://filepress.*"

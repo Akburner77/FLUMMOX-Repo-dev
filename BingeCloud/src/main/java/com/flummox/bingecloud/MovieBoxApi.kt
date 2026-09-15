@@ -31,6 +31,9 @@ private val MB_HOSTS = listOf(
 private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
 private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
 
+// ══════════════════════════════════════════════════════════════
+// ── DEVICE ID ──
+// ══════════════════════════════════════════════════════════════
 private val mbDeviceIdLock = Any()
 private var mbDeviceId: String? = null
 
@@ -49,6 +52,9 @@ private fun clientInfo(): String {
     return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"official","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── CRYPTO ──
+// ══════════════════════════════════════════════════════════════
 private fun md5Hex(data: ByteArray): String {
     val md = MessageDigest.getInstance("MD5")
     return md.digest(data).joinToString("") { "%02x".format(it) }
@@ -148,7 +154,36 @@ private fun buildHeaders(
     return map
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── SESSION ──
+// ══════════════════════════════════════════════════════════════
 private var mbSession: String? = null
+
+// ── JWT expiry parser for session persistence ──
+private fun parseJwtExp(token: String): Long {
+    return try {
+        val parts = token.split(".")
+        if (parts.size != 3) return 0L
+        val padding = when (parts[1].length % 4) {
+            2 -> "=="
+            3 -> "="
+            else -> ""
+        }
+        val decoded = Base64.decode(parts[1] + padding, Base64.URL_SAFE or Base64.NO_WRAP)
+        JSONObject(String(decoded)).optLong("exp", 0L) * 1000L
+    } catch (e: Exception) { 0L }
+}
+
+// ── restore session from disk on boot ──
+fun restoreMbSession() {
+    val tok = Settings.getMbToken() ?: return
+    val exp = Settings.getMbTokenExp()
+    if (exp > System.currentTimeMillis() + 60 * 60 * 1000L) {
+        mbSession = tok
+        val mins = (exp - System.currentTimeMillis()) / 60000
+        BCLog.d("MB session restored (exp in ${mins}min)")
+    }
+}
 
 private suspend fun bootstrapToken(): String? {
     val url = "https://$MB_BOOTSTRAP_HOST$MB_BOOTSTRAP_PATH"
@@ -163,6 +198,8 @@ private suspend fun bootstrapToken(): String? {
         if (tok != null) {
             BCLog.d("MB token len=${tok.length}")
             mbSession = tok
+            val exp = parseJwtExp(tok)
+            if (exp > 0) Settings.saveMbToken(tok, exp)
         }
         tok
     } catch (e: Exception) {
@@ -173,10 +210,15 @@ private suspend fun bootstrapToken(): String? {
 
 private suspend fun ensureSession(): String? {
     mbSession?.let { return it }
+    restoreMbSession()
+    mbSession?.let { return it }
     BCLog.d("MB: no session, bootstrapping…")
     return bootstrapToken()
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── GET / POST ──
+// ══════════════════════════════════════════════════════════════
 private suspend fun mbGet(path: String, query: String? = null, retried: Boolean = false): JSONObject? {
     val cacheKey = "mb:get:$path?${query ?: ""}"
     BCCache.get(cacheKey)?.let {
@@ -198,7 +240,6 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
                 return try { JSONObject(text) } catch (e: Exception) {
                     BCLog.e("MB JSON parse: ${e.message}"); null
                 }
-                continue
             }
             if ((res.code == 401 || res.code == 403) && !retried) {
                 mbSession = null
@@ -220,6 +261,9 @@ data class MBStream(
     val audio: String? = null
 )
 
+// ══════════════════════════════════════════════════════════════
+// ── SEARCH ──
+// ══════════════════════════════════════════════════════════════
 suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     val cacheKey = "mb:search:$query:$page"
     BCCache.get(cacheKey)?.let { return parseSearchResults(it) }
@@ -272,6 +316,9 @@ private fun parseSearchResults(text: String): List<MBSubject> {
 suspend fun mbDetail(subjectId: String): JSONObject? =
     mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
+// ══════════════════════════════════════════════════════════════
+// ── LANGUAGES ──
+// ══════════════════════════════════════════════════════════════
 suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
     val detail = try { mbDetail(originalSubjectId) } catch (e: Exception) { null }
     val dubs = detail?.optJSONObject("data")?.optJSONArray("dubs")
@@ -296,6 +343,10 @@ suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
     BCLog.d("MB langs: ${out.map { it.second }}")
     return out
 }
+
+// ══════════════════════════════════════════════════════════════
+// ── PLAY-INFO ──
+// ══════════════════════════════════════════════════════════════
 suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()

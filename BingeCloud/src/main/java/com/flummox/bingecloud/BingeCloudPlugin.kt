@@ -22,6 +22,12 @@ class BingeCloudPlugin : Plugin() {
         BCLog.d("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
         BCLog.d("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
 
+        // ── restore MB session from disk (skip bootstrap if token still valid) ──
+        restoreMbSession()
+
+        // ── fire TLS/DNS prewarm for known hosts ──
+        com.flummox.bingecore.Prewarm.fire()
+
         registerMainAPI(BingeCloudProvider())
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())

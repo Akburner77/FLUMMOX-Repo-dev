@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
@@ -24,8 +25,10 @@ private const val PREFETCH_DEBOUNCE_MS = 800L
 
 private val PREFETCH_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 private var activePrefetchJob: Job? = null
+private var lastHomeRenderMs: Long = 0L
+private const val HOME_GRACE_MS = 5000L
 
-private fun StreamQuery.cacheKey(): String =
+fun StreamQuery.cacheKey(): String =
     "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
 open class BingeCloudProvider : MainAPI() {
@@ -50,11 +53,12 @@ open class BingeCloudProvider : MainAPI() {
 
     // ── home ──
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val parts = request.data.split(ROW_TAG)
-        if (parts.size < 2) return null
-        val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-            .mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+    val parts = request.data.split(ROW_TAG)
+    if (parts.size < 2) return null
+    lastHomeRenderMs = System.currentTimeMillis()
+    val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+        .mapNotNull { it.toSearchResponse() }
+    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     // ── search ──
@@ -108,8 +112,13 @@ open class BingeCloudProvider : MainAPI() {
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
-        // ── prefetch: debounced 800ms ──
-        if (Settings.isPrefetchEnabled()) {
+        // ── prefetch: skip if triggered by home banner render ──
+            val sinceHome = System.currentTimeMillis() - lastHomeRenderMs
+            val fromHomeBanner = sinceHome in 0 until HOME_GRACE_MS
+            if (fromHomeBanner) {
+               BCLog.d("load() preview (no prefetch): ${name.take(40)} [${sinceHome}ms since home]")
+            }
+            if (Settings.isPrefetchEnabled() && !fromHomeBanner) {
             val prefetchQuery: StreamQuery? = when {
                 tvType == TvType.Movie && videos.isEmpty() ->
                     StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
@@ -187,7 +196,7 @@ open class BingeCloudProvider : MainAPI() {
         }
     }
 
-    // ── loadLinks: score, sort, extractor decides ──
+    // ── loadLinks ──
     override suspend fun loadLinks(
         data: String, isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -201,83 +210,94 @@ open class BingeCloudProvider : MainAPI() {
         if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
         if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
-        // ── 1. score all mirrors (URL math only, no network) ──
-        val scored = mirrors
-            .map { it to LinkScore.prelimScore(it) }
-            .sortedWith(
-                compareByDescending<Pair<ScrapedMirror, Int>> { it.second }
-                    .thenByDescending { qualityRank(it.first.quality) }
-                    .thenBy { audioPriority(it.first.mirror, it.first.source) }
-            )
-
-        // ── 2. apply quality preference on top ──
+        // ── 1. sort: smart (by score + emoji) or raw (source order) ──
+        val smartSort = Settings.isPrefilterEnabled()
         val pref = Settings.getQualityPref()
         val prefRank = qualityRank(pref)
-        val finalOrder = scored.sortedWith(
-            compareByDescending<Pair<ScrapedMirror, Int>> {
-                if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
-            }
-                .thenByDescending { it.second }
-                .thenByDescending { qualityRank(it.first.quality) }
-                .thenBy { audioPriority(it.first.mirror, it.first.source) }
-        )
+
+        val finalOrder: List<Pair<ScrapedMirror, Int>> = if (smartSort) {
+            mirrors
+                .map { it to LinkScore.prelimScore(it) }
+                .sortedWith(
+                    compareByDescending<Pair<ScrapedMirror, Int>> {
+                        if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+                    }
+                        .thenByDescending { it.second }
+                        .thenByDescending { qualityRank(it.first.quality) }
+                        .thenBy { audioPriority(it.first.mirror, it.first.source) }
+                )
+        } else {
+            mirrors
+                .map { it to 0 }
+                .sortedWith(
+                    compareByDescending<Pair<ScrapedMirror, Int>> {
+                        if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+                    }
+                        .thenByDescending { qualityRank(it.first.quality) }
+                )
+        }
 
         val concurrency = Settings.getConcurrency().coerceIn(1, 50)
-        BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency)")
+        BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency, smart=$smartSort)")
 
         val sem = Semaphore(concurrency)
 
-        // ── 3. resolve in parallel — extractor success = link is alive ──
+        // ── per-host concurrency cap (prevents rate limiting) ──
+        val hostSems = ConcurrentHashMap<String, Semaphore>()
+        fun hostSem(host: String): Semaphore =
+            hostSems.getOrPut(host) { Semaphore(5) }
+
         val perMirror: List<List<ExtractorLink>> = coroutineScope {
             finalOrder.map { (m, score) ->
                 async {
                     sem.withPermit {
-                        try {
-                            val emoji = LinkScore.emoji(score)
-                            if (m.source == "MB") {
-                                val linkType = when {
-                                    m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
-                                    m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
-                                    else -> ExtractorLinkType.VIDEO
-                                }
-                                val display = "$emoji${m.quality} •MB ${m.mirror}"
-                                BCLog.d("MB link: $display (score=$score)")
-                                val hdrs = m.headers
-                                val link = newExtractorLink("MovieBox", display, m.url, linkType) {
-                                    this.referer = "https://h5.aoneroom.com/"
-                                    if (hdrs != null) this.headers = hdrs
-                                }
-                                HostHealth.recordSuccess("mb.local")
-                                listOf(link)
-                            } else {
-                                // ── Phase 2: no prefilter, extractor failure = drop ──
-                                val finalUrl = resolveWrapper(m.url)
-                                if (finalUrl == null) {
-                                    BCLog.d("unresolved: ${m.mirror}")
-                                    HostHealth.recordFailure(hostOf(m.url))
-                                    emptyList()
+                        val host = hostOf(m.url).ifBlank { "unknown" }
+                        hostSem(host).withPermit {
+                            try {
+                                val emoji = if (smartSort) LinkScore.emoji(score) else ""
+                                if (m.source == "MB") {
+                                    val linkType = when {
+                                        m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                        m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                        else -> ExtractorLinkType.VIDEO
+                                    }
+                                    val display = "$emoji${m.quality} •MB ${m.mirror}"
+                                    BCLog.d("MB link: $display (score=$score)")
+                                    val hdrs = m.headers
+                                    val link = newExtractorLink("MovieBox", display, m.url, linkType) {
+                                        this.referer = "https://h5.aoneroom.com/"
+                                        if (hdrs != null) this.headers = hdrs
+                                    }
+                                    HostHealth.recordSuccess("mb.local")
+                                    listOf(link)
                                 } else {
-                                    val bag = mutableListOf<ExtractorLink>()
-                                    VCloud(m.source, m.mirror, m.quality, emoji)
-                                        .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
-                                    if (bag.isEmpty()) HostHealth.recordFailure(hostOf(m.url))
-                                    else HostHealth.recordSuccess(hostOf(m.url))
-                                    bag
+                                    val finalUrl = resolveWrapper(m.url)
+                                    if (finalUrl == null) {
+                                        BCLog.d("unresolved: ${m.mirror}")
+                                        HostHealth.recordFailure(host)
+                                        emptyList()
+                                    } else {
+                                        val bag = mutableListOf<ExtractorLink>()
+                                        VCloud(m.source, m.mirror, m.quality, emoji)
+                                            .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
+                                        if (bag.isEmpty()) HostHealth.recordFailure(host)
+                                        else HostHealth.recordSuccess(host)
+                                        bag
+                                    }
                                 }
+                            } catch (e: Exception) {
+                                BCLog.e("${m.mirror} failed: ${e.message}")
+                                HostHealth.recordFailure(host)
+                                emptyList()
                             }
-                        } catch (e: Exception) {
-                            BCLog.e("${m.mirror} failed: ${e.message}")
-                            HostHealth.recordFailure(hostOf(m.url))
-                            emptyList()
                         }
                     }
                 }
             }.awaitAll()
         }
 
-        val allLinks = perMirror.flatten()
-        allLinks.forEach { callback.invoke(it) }
-        BCLog.d("loadLinks done (${allLinks.size} links)")
+        perMirror.flatten().forEach { callback.invoke(it) }
+        BCLog.d("loadLinks done (${perMirror.flatten().size} links)")
 
         // ── 4. prefetch next episode ──
         if (Settings.isPrefetchEnabled() && query.type == "series"
