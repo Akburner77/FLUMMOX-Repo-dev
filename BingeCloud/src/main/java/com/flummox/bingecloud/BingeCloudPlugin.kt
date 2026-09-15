@@ -16,8 +16,8 @@ import com.lagradost.cloudstream3.plugins.Plugin
 class BingeCloudPlugin : Plugin() {
     override fun load(context: Context) {
         BingeCloudCtx.context = context
-
         BCLog.init(context)
+        HostHealth.init(context)
         BCLog.section("BingeCloud boot")
         BCLog.d("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
         BCLog.d("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")

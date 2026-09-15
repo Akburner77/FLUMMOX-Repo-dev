@@ -63,6 +63,7 @@ private val TRAILING_QUALITY_REGEX = Regex("""[\s·•\-]*\d{3,4}[pP]?\s*$""")
 private fun cleanServerName(raw: String): String =
     raw.replace(TRAILING_QUALITY_REGEX, "").trim()
 
+// ── automatic server name shortening for any provider ──
 private fun shortenServer(raw: String): String {
     val clean = cleanServerName(raw)
     if (clean.isEmpty()) return clean
@@ -73,11 +74,23 @@ private fun shortenServer(raw: String): String {
         l.contains("vcloud") -> "VCloud"
         l.contains("vega") -> "Vega"
         l.contains("hdhub4u") || l.contains("hdhub") -> "HDhub"
+        l.contains("pixeldrain") || l.contains("pixelserver") -> "Pixel"
+        l.contains("10gbps") || l.contains("10 gbps") -> "10Gbps"
         l.contains("fsl") -> "FSL"
-        l.contains("pixeldrain") -> "Pixel"
         l.contains("gdirect") -> "GDrive"
         l.contains("gdrive") || l.contains("google drive") -> "GDrive"
         l.contains("filepress") -> "FPress"
+        l.contains("r2.dev") || l.contains("cloudflarestorage") -> "R2"
+        l.contains("buzzserver") -> "Buzz"
+        l.contains("mega.nz") || l.contains("mega ") -> "Mega"
+        l.contains("gofile") -> "Gofile"
+        l.contains("dropbox") -> "Dropbox"
+        l.contains("onedrive") -> "OneDrive"
+        // ── fallback for "Download [Tag : N]" patterns ──
+        l.contains("download [") -> {
+            Regex("""\[([^\]]+)\]""").find(clean)?.groupValues?.get(1)
+                ?.split(":")?.firstOrNull()?.trim()?.ifBlank { "Server" } ?: "Server"
+        }
         else -> clean
     }
 }
@@ -85,17 +98,18 @@ private fun shortenServer(raw: String): String {
 open class VCloud(
     var sourceTag: String = "VC",
     var mirrorLabel: String = "",
-    var qualityLabel: String = ""
+    var qualityLabel: String = "",
+    var emojiPrefix: String = ""
 ) : ExtractorApi() {
     override val name: String = "V-Cloud"
     override val mainUrl: String = "https://vcloud.*"
     override val requiresReferer = false
 
     private fun displayName(subServer: String): String {
-        val q = qualityLabel.ifBlank { "Auto" }
-        val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
-        val s = shortenServer(raw).ifBlank { "VCloud" }
-        return "$q •$sourceTag $s"
+    val q = qualityLabel.ifBlank { "Auto" }
+    val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
+    val s = shortenServer(raw).ifBlank { "VCloud" }
+    return "$emojiPrefix$q •$sourceTag $s"
     }
 
     fun extractPxlUrl(html: String): String? {
@@ -132,16 +146,16 @@ open class VCloud(
                     val display = displayName(subServer)
                     BCLog.d("VCloud OK: $display")
                     callback.invoke(
-                        newExtractorLink(
-                            source = name,
-                            name = display,
-                            url = href,
-                            type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = "https://hubcloud.ist/"
-                            this.quality = getIndexQuality(qualityLabel)
-                        }
-                    )
+                      newExtractorLink(
+                      source = name,
+                      name = display,
+                      url = href,
+                    type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                 ) {
+                   this.referer = "https://hubcloud.ist/"
+        // ── quality NOT set on ExtractorLink — picker preserves our sort order ──
+                      }
+                   )
                 }
             }
             return
@@ -158,16 +172,16 @@ open class VCloud(
         val display = displayName("VCloud")
         BCLog.d("VCloud OK: $display")
         callback.invoke(
-            newExtractorLink(
-                source = name,
-                name = display,
-                url = resolved,
-                type = ExtractorLinkType.VIDEO
-            ) {
-                this.referer = url
-                this.quality = getIndexQuality(qualityLabel)
-            }
-        )
+           newExtractorLink(
+           source = name,
+           name = display,
+           url = resolved,
+           type = ExtractorLinkType.VIDEO
+         ) {
+        this.referer = url
+        // ── quality NOT set — picker preserves our sort order ──
+          }
+       )
     }
 }
 

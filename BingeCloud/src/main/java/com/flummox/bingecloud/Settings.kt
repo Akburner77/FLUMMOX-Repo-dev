@@ -34,6 +34,9 @@ import android.widget.Toast
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
+// ══════════════════════════════════════════════════════════════
+// ── ROW SPEC: describes a homepage row ──
+// ══════════════════════════════════════════════════════════════
 data class RowSpec(
     val key: String,
     val type: String,
@@ -43,8 +46,12 @@ data class RowSpec(
     val sourceLabel: String
 )
 
+// ══════════════════════════════════════════════════════════════
+// ── SETTINGS OBJECT ──
+// ══════════════════════════════════════════════════════════════
 object Settings {
 
+    // ── preference keys ──
     const val K_CONCURRENCY = "bingecloud_concurrency"
     const val K_CF_DOMAINS = "bingecloud_cf_domains"
     const val K_CF_COOKIE_PREFIX = "bingecloud_cf_cookie_"
@@ -84,17 +91,20 @@ object Settings {
 
     val DEFAULT_CF_DOMAINS = emptyList<String>()
 
+    // ══════════════════════════════════════════════════════════════
+    // ── ALL ROWS: homepage catalog definitions ──
+    // ══════════════════════════════════════════════════════════════
     val ALL_ROWS: List<RowSpec> = listOf(
-        RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", null, "TMDB"),
-        RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", null, "TMDB"),
-        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.top", "Popular Movies", null, "TMDB"),
-        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.top", "Popular Series", null, "TMDB"),
-        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "hi", "TMDB • Hindi"),
-        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "hi", "TMDB • Hindi"),
-        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "Action", "TVDB"),
+        RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
+        RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
+        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.trending", "Popular Movies", "Week", "TMDB • This Week"),
+        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.trending", "Popular Series", "Week", "TMDB • This Week"),
+        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "Hindi", "TMDB • Hindi"),
+        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "Hindi", "TMDB • Hindi"),
+        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "genre=Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "genre=Action", "TVDB"),
+        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "genre=Action", "TVDB"),
         RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
         RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
         RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
@@ -103,11 +113,11 @@ object Settings {
         RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
         RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
         RowSpec(K_ROW_MOST_FAV_ANIME, "anime", "mal.most_favorites", "Most Favorited Anime", null, "MAL"),
-        RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best of 2020s", "Action", "MAL"),
-        RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best of 2010s", "Action", "MAL"),
-        RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best of 2000s", "Action", "MAL"),
-        RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best of 90s", "Action", "MAL"),
-        RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best of 80s", "Action", "MAL"),
+        RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best of 2020s", "genre=Action", "MAL"),
+        RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best of 2010s", "genre=Action", "MAL"),
+        RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best of 2000s", "genre=Action", "MAL"),
+        RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best of 90s", "genre=Action", "MAL"),
+        RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best of 80s", "genre=Action", "MAL"),
     )
 
     private val DEFAULT_ON_ROWS = setOf(
@@ -121,6 +131,7 @@ object Settings {
         K_ROW_AIRING_ANIME
     )
 
+    // ── row order ──
     fun getRowOrder(): List<String> {
         val stored = getKey<String>(K_ROW_ORDER) ?: ""
         val parts = stored.split("|").map { it.trim() }.filter { it.isNotBlank() }
@@ -136,7 +147,13 @@ object Settings {
 
     fun getRowSpecByKey(key: String): RowSpec? = ALL_ROWS.firstOrNull { it.key == key }
 
-    fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 15).coerceIn(1, 50)
+    // ── basic prefs ──
+    fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 50).coerceIn(1, 50)
+    fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
+    fun isPrefetchEnabled(): Boolean = getKey<Boolean>(K_PREFETCH) ?: true
+    fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
+
+    // ── CF cookies ──
     fun getCfDomains(): List<String> =
         (getKey<String>(K_CF_DOMAINS) ?: "").split(",").map { it.trim() }.filter { it.isNotBlank() }
     fun getCookieForDomain(domain: String): String? =
@@ -151,20 +168,26 @@ object Settings {
         val cur = getCfDomains().toMutableSet().also { it.remove(domain) }
         setKey(K_CF_DOMAINS, cur.joinToString(","))
     }
+
+    // ── FebBox token ──
     fun getFebBoxToken(): String = getKey<String>(K_FEBBOX_TOKEN) ?: ""
     fun saveFebBoxToken(t: String) { setKey(K_FEBBOX_TOKEN, t) }
     fun clearFebBoxToken() { setKey(K_FEBBOX_TOKEN, "") }
+
+    // ── source toggles ──
     fun isSrcVm(): Boolean = getKey<Boolean>(K_SRC_VM) ?: true
     fun isSrcMd(): Boolean = getKey<Boolean>(K_SRC_MD) ?: true
     fun isSrcHdh(): Boolean = getKey<Boolean>(K_SRC_HDH) ?: true
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
-    fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
-    fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
-    fun isPrefetchEnabled(): Boolean = getKey<Boolean>(K_PREFETCH) ?: true
+
+    // ── row enabled check ──
     fun isRowEnabled(key: String): Boolean =
         getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
 
+    // ══════════════════════════════════════════════════════════════
+    // ── COLORS ──
+    // ══════════════════════════════════════════════════════════════
     private const val BG = 0xFF0A0D14.toInt()
     private const val SKY_TOP = 0xFF1E3A5F.toInt()
     private const val SKY_MID = 0xFF142238.toInt()
@@ -185,6 +208,9 @@ object Settings {
     private const val DISABLED = 0xFF3A4555.toInt()
     private const val LOG_TEXT = 0xFFB8C4D4.toInt()
 
+    // ══════════════════════════════════════════════════════════════
+    // ── SHAPE HELPERS ──
+    // ══════════════════════════════════════════════════════════════
     private fun dp(ctx: Context, v: Int): Int =
         (v * ctx.resources.displayMetrics.density).toInt()
 
@@ -230,6 +256,9 @@ object Settings {
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── SHOOTING STARS: header animation ──
+    // ══════════════════════════════════════════════════════════════
     private class ShootingStarsView(context: Context) : View(context) {
         private data class Star(
             var x: Float, var y: Float, var vx: Float, var vy: Float,
@@ -291,6 +320,9 @@ object Settings {
         }
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── CARD: collapsible UI element ──
+    // ══════════════════════════════════════════════════════════════
     private class Card(
         val root: LinearLayout,
         val body: LinearLayout,
@@ -361,6 +393,9 @@ object Settings {
         return Card(root, bodyLayout, status, chev)
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── REUSABLE ROW BUILDERS ──
+    // ══════════════════════════════════════════════════════════════
     private fun toggleRow(
         ctx: Context, label: String, desc: String?, initial: Boolean,
         onChange: (Boolean) -> Unit
@@ -606,6 +641,9 @@ object Settings {
         return row
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── MAIN SETTINGS DIALOG ──
+    // ══════════════════════════════════════════════════════════════
     fun showSettingsDialog(ctx: Context, onSaved: () -> Unit) {
         lateinit var dialog: AlertDialog
 
@@ -614,6 +652,7 @@ object Settings {
             background = bg(BG, 0, ctx)
         }
 
+        // ── header with sky gradient + shooting stars ──
         run {
             val headerFrame = FrameLayout(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -657,6 +696,7 @@ object Settings {
         }
         scroll.addView(body)
 
+        // ── Performance card ──
         run {
             val c = buildCard(ctx, "⚡", "Performance", "Control scraping speed")
             c.body.addView(stepperRow(
@@ -671,6 +711,7 @@ object Settings {
             body.addView(c.root)
         }
 
+        // ── Cloudflare bypass card ──
         run {
             val saved = getCfDomains()
             val c = buildCard(
@@ -712,6 +753,7 @@ object Settings {
             body.addView(c.root)
         }
 
+        // ── FebBox card ──
         run {
             val has = getFebBoxToken().isNotBlank()
             val c = buildCard(
@@ -751,6 +793,7 @@ object Settings {
             body.addView(c.root)
         }
 
+        // ── Sources card ──
         run {
             val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox()).count { it }
             val c = buildCard(
@@ -764,6 +807,7 @@ object Settings {
             body.addView(c.root)
         }
 
+        // ── Preferred quality ──
         run {
             val cur = getQualityPref()
             val c = buildCard(ctx, "🎞️", "Preferred Quality", "Current: $cur")
@@ -788,128 +832,132 @@ object Settings {
             body.addView(c.root)
         }
 
+        // ── Link Validation (prefilter) ──
         run {
             val c = buildCard(ctx, "🧪", "Link Validation", "Pre-filter dead links")
             c.body.addView(toggleRow(
                 ctx, "Pre-filter unreachable",
-                "Test each link before showing it in the dialog (slightly slower)",
+                "Test each link before showing it (slightly slower)",
                 isPrefilterEnabled()
             ) { setKey(K_PREFILTER, it) })
             body.addView(c.root)
         }
 
-        
         // ── Debug Logs ──
-run {
-    val c = buildCard(
-        ctx, "🐞", "Debug Logs",
-        "Local · ${BCLog.count()} lines • tap ▸ to expand"
-    )
+        run {
+            val c = buildCard(
+                ctx, "🐞", "Debug Logs",
+                "Local · ${BCLog.count()} lines • tap ▸ to expand"
+            )
 
-    val logView = TextView(ctx).apply {
-        typeface = Typeface.MONOSPACE
-        textSize = 10f
-        setTextColor(LOG_TEXT)
-        setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
-        setTextIsSelectable(false)
-        text = BCLog.allSanitized()
-    }
-
-    val logScroll = ScrollView(ctx).apply {
-        background = bg(INPUT, 8, ctx)
-        isVerticalScrollBarEnabled = false
-        isFillViewport = false
-    }
-    logScroll.addView(logView, ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-    ))
-    logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
-
-    val logScrollbar = LogScrollbar(ctx, logScroll)
-    val logRow = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 320)
-        ).apply {
-            leftMargin = dp(ctx, 8)
-            rightMargin = dp(ctx, 8)
-            bottomMargin = dp(ctx, 6)
-        }
-    }
-    logRow.addView(logScroll, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-    logRow.addView(logScrollbar, LinearLayout.LayoutParams(dp(ctx, 10), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-    leftMargin = dp(ctx, 2)
-})
-
-    val btnRow = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL
-        setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 4))
-    }
-
-    fun smallBtn(label: String, color: Int, onClick: () -> Unit) = Button(ctx).apply {
-        text = label
-        textSize = 12f
-        setTextColor(color)
-        background = accentPill(ctx)
-        isAllCaps = false
-        setPadding(dp(ctx, 10), dp(ctx, 6), dp(ctx, 10), dp(ctx, 6))
-        minHeight = 0; minWidth = 0
-        layoutParams = LinearLayout.LayoutParams(
-            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-        ).apply { leftMargin = dp(ctx, 3); rightMargin = dp(ctx, 3) }
-        setOnClickListener { onClick() }
-    }
-
-    btnRow.addView(smallBtn("Refresh", ACCENT_STRONG) {
-        logView.text = BCLog.allSanitized()
-        logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
-    })
-    btnRow.addView(smallBtn("Save", ACCENT_STRONG) {
-        try {
-            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
-                .format(java.util.Date())
-            val fname = "bingelog_$ts.txt"
-            val content = BCLog.allSanitized()
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                val values = android.content.ContentValues().apply {
-                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fname)
-                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                        android.os.Environment.DIRECTORY_DOWNLOADS)
-                }
-                val uri = ctx.contentResolver.insert(
-                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
-                )
-                uri?.let {
-                    ctx.contentResolver.openOutputStream(it)?.use { os -> os.write(content.toByteArray()) }
-                    Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
-                } ?: Toast.makeText(ctx, "Save failed", Toast.LENGTH_SHORT).show()
-            } else {
-                val dir = android.os.Environment
-                    .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-                dir.mkdirs()
-                java.io.File(dir, fname).writeText(content)
-                Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
+            val logView = TextView(ctx).apply {
+                typeface = Typeface.MONOSPACE
+                textSize = 10f
+                setTextColor(LOG_TEXT)
+                setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
+                setTextIsSelectable(false)
+                text = BCLog.allSanitized()
             }
-        } catch (e: Exception) {
-            Toast.makeText(ctx, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+
+            val logScroll = ScrollView(ctx).apply {
+                background = bg(INPUT, 8, ctx)
+                isVerticalScrollBarEnabled = false
+                isFillViewport = false
+            }
+            logScroll.addView(logView, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+
+            val logScrollbar = LogScrollbar(ctx, logScroll)
+
+            val logRow = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 320)
+                ).apply {
+                    leftMargin = dp(ctx, 8)
+                    rightMargin = dp(ctx, 8)
+                    bottomMargin = dp(ctx, 6)
+                }
+            }
+            logRow.addView(logScroll, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            logRow.addView(logScrollbar, LinearLayout.LayoutParams(dp(ctx, 10), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                leftMargin = dp(ctx, 2)
+            })
+
+            val btnRow = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 4))
+            }
+
+            fun smallBtn(label: String, color: Int, onClick: () -> Unit) = Button(ctx).apply {
+                text = label
+                textSize = 12f
+                setTextColor(color)
+                background = accentPill(ctx)
+                isAllCaps = false
+                setPadding(dp(ctx, 10), dp(ctx, 6), dp(ctx, 10), dp(ctx, 6))
+                minHeight = 0; minWidth = 0
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                ).apply { leftMargin = dp(ctx, 3); rightMargin = dp(ctx, 3) }
+                setOnClickListener { onClick() }
+            }
+
+            btnRow.addView(smallBtn("Refresh", ACCENT_STRONG) {
+                logView.text = BCLog.allSanitized()
+                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+            })
+            btnRow.addView(smallBtn("Save", ACCENT_STRONG) {
+                try {
+                    val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                        .format(java.util.Date())
+                    val fname = "bingelog_$ts.txt"
+                    val content = BCLog.allSanitized()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fname)
+                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                                android.os.Environment.DIRECTORY_DOWNLOADS)
+                        }
+                        val uri = ctx.contentResolver.insert(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                        )
+                        uri?.let {
+                            ctx.contentResolver.openOutputStream(it)?.use { os ->
+                                os.write(content.toByteArray())
+                            }
+                            Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
+                        } ?: Toast.makeText(ctx, "Save failed", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val dir = android.os.Environment
+                            .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        dir.mkdirs()
+                        java.io.File(dir, fname).writeText(content)
+                        Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(ctx, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            })
+            btnRow.addView(smallBtn("Copy", ACCENT_STRONG) {
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("BingeCloud Logs", BCLog.allSanitized()))
+                Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+            })
+            btnRow.addView(smallBtn("Clear", RED) {
+                BCLog.clear()
+                logView.text = "(cleared)"
+            })
+
+            c.body.addView(logRow)
+            c.body.addView(btnRow)
+            body.addView(c.root)
         }
-    })
-    btnRow.addView(smallBtn("Copy", ACCENT_STRONG) {
-        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("BingeCloud Logs", BCLog.allSanitized()))
-        Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
-    })
-    btnRow.addView(smallBtn("Clear", RED) {
-        BCLog.clear()
-        logView.text = "(cleared)"
-    })
 
-    c.body.addView(logRow)
-    c.body.addView(btnRow)
-    body.addView(c.root)
-}
-
+        // ── Homepage rows card ──
         run {
             val c = buildCard(
                 ctx, "🏠", "Homepage", "Tap ▲▼ to reorder sections"
@@ -963,6 +1011,7 @@ run {
             body.addView(c.root)
         }
 
+        // ── footer ──
         run {
             val footer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
@@ -988,6 +1037,7 @@ run {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
+        // ── bottom bar ──
         run {
             val bar = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1019,6 +1069,9 @@ run {
         dialog.show()
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── CF WebView ──
+    // ══════════════════════════════════════════════════════════════
     @SuppressLint("SetJavaScriptEnabled")
     private fun openCfWebView(ctx: Context, startUrl: String, domain: String) {
         val dlg = Dialog(ctx)
@@ -1106,6 +1159,9 @@ run {
         dlg.show()
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── FebBox login WebView ──
+    // ══════════════════════════════════════════════════════════════
     @SuppressLint("SetJavaScriptEnabled")
     private fun openFebBoxLogin(ctx: Context, onSaved: () -> Unit) {
         val dlg = Dialog(ctx)
