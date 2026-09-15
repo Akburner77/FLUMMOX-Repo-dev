@@ -198,6 +198,7 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
                 return try { JSONObject(text) } catch (e: Exception) {
                     BCLog.e("MB JSON parse: ${e.message}"); null
                 }
+                continue
             }
             if ((res.code == 401 || res.code == 403) && !retried) {
                 mbSession = null
