@@ -85,17 +85,18 @@ private fun shortenServer(raw: String): String {
 open class VCloud(
     var sourceTag: String = "VC",
     var mirrorLabel: String = "",
-    var qualityLabel: String = ""
+    var qualityLabel: String = "",
+    var emojiPrefix: String = ""
 ) : ExtractorApi() {
     override val name: String = "V-Cloud"
     override val mainUrl: String = "https://vcloud.*"
     override val requiresReferer = false
 
     private fun displayName(subServer: String): String {
-        val q = qualityLabel.ifBlank { "Auto" }
-        val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
-        val s = shortenServer(raw).ifBlank { "VCloud" }
-        return "$q •$sourceTag $s"
+    val q = qualityLabel.ifBlank { "Auto" }
+    val raw = subServer.ifBlank { mirrorLabel }.ifBlank { sourceTag }
+    val s = shortenServer(raw).ifBlank { "VCloud" }
+    return "$emojiPrefix$q •$sourceTag $s"
     }
 
     fun extractPxlUrl(html: String): String? {
