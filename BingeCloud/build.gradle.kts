@@ -26,10 +26,10 @@ kotlin {
 }
 
 cloudstream {
-    description = "BingeCloud - Movies & TV Series"
+    description = "BingeCloud - TV Series, Movies, Anime"
     authors = listOf("FlummoxGamer")
     status = 1
-    tvTypes = listOf("All in one Extension")
+    tvTypes = listOf("Movies","TV Series","Anime")
     language = "en"
     iconUrl = "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/BingeCloud/icon.png"
 }
