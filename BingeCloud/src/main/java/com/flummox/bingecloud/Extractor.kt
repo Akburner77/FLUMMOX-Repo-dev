@@ -84,10 +84,30 @@ suspend fun resolveFinalUrl(startUrl: String): String? {
     return currentUrl
 }
 
-open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
+private val TRAILING_QUALITY_REGEX = Regex("""[\s·•\-]*\d{3,4}[pP]?\s*$""")
+
+private fun cleanServerName(raw: String): String =
+    raw.replace(TRAILING_QUALITY_REGEX, "").trim()
+
+/**
+ * VCloud / HubCloud / GDFlix extractor.
+ * Display name format: "{Quality} •{SOURCE} {ServerName}" e.g. "1080p •MD HubCloud"
+ */
+open class VCloud(
+    var sourceTag: String = "VC",
+    var mirrorLabel: String = "",
+    var qualityLabel: String = ""
+) : ExtractorApi() {
     override val name: String = "V-Cloud"
     override val mainUrl: String = "https://vcloud.*"
     override val requiresReferer = false
+
+    private fun displayName(fallbackServer: String): String {
+        val q = qualityLabel.ifBlank { "Auto" }
+        val candidate = mirrorLabel.ifBlank { fallbackServer }
+        val cleaned = cleanServerName(candidate).ifBlank { "VCloud" }
+        return "$q •$sourceTag $cleaned"
+    }
 
     fun extractPxlUrl(html: String): String? {
         val regex = Regex("""var\s+pxl\s*=\s*["']([^"']+)["']""")
@@ -102,53 +122,58 @@ open class VCloud(var sourceTag: String = "VC") : ExtractorApi() {
     }
 
     override suspend fun getUrl(
-    url: String,
-    referer: String?,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-) {
-    val doc = cloudflareGetDoc(url) ?: return
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val doc = cloudflareGetDoc(url) ?: return
 
-    val gamerxyt = doc.selectFirst("script:containsData(hubcloud.php)")?.toString()
-        ?.let { Regex("""var\s+url\s*=\s*['"](https?://[^'"]+)['"]""").find(it)?.groupValues?.get(1) }
+        val gamerxyt = doc.selectFirst("script:containsData(hubcloud.php)")?.toString()
+            ?.let { Regex("""var\s+url\s*=\s*['"](https?://[^'"]+)['"]""").find(it)?.groupValues?.get(1) }
 
-    if (gamerxyt != null && !gamerxyt.contains(".m3u8")) {
-        val finalDoc = cloudflareGetDoc(gamerxyt) ?: return
-        val finalAnchors = finalDoc.select("a[href].btn, a[href][id]")
-        for (a in finalAnchors) {
-            val href = a.attr("href")
-            if (href.startsWith("http") &&
-                (href.contains("cloudflarestorage", true) || href.contains("r2.dev", true) ||
-                 href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
-                 href.contains("busycdn", true) || href.contains("video-downloads", true))) {
-                val label = a.text().ifBlank { "HubCloud" }.trim()
-                callback.invoke(
-                    newExtractorLink(
-                        source = name,
-                        name = label,
-                        url = href,
-                        type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                    ) {
-                        this.referer = "https://hubcloud.ist/"
-                        this.quality = Qualities.Unknown.value
-                    }
-                )
+        if (gamerxyt != null && !gamerxyt.contains(".m3u8")) {
+            val finalDoc = cloudflareGetDoc(gamerxyt) ?: return
+            val finalAnchors = finalDoc.select("a[href].btn, a[href][id]")
+            for (a in finalAnchors) {
+                val href = a.attr("href")
+                if (href.startsWith("http") &&
+                    (href.contains("cloudflarestorage", true) || href.contains("r2.dev", true) ||
+                     href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
+                     href.contains("busycdn", true) || href.contains("video-downloads", true))) {
+                    val serverName = a.text().ifBlank { "HubCloud" }.trim()
+                    callback.invoke(
+                        newExtractorLink(
+                            source = name,
+                            name = displayName(serverName),
+                            url = href,
+                            type = if (href.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = "https://hubcloud.ist/"
+                            this.quality = getIndexQuality(qualityLabel)
+                        }
+                    )
+                }
             }
+            return
         }
-        return
-    }
 
-    val scriptTag = doc.selectFirst("script:containsData(url)")?.toString() ?: ""
-    val link = if (url.contains("vcloud", true)) extractDoubleAtob(scriptTag) ?: ""
-        else Regex("var url = '([^']*)'").find(scriptTag)?.groupValues?.get(1) ?: ""
-    if (link.isEmpty()) return
-    val resolved = if (!link.startsWith("http")) getBaseUrl(url) + link else link
-    callback.invoke(
-        newExtractorLink(source = name, name = name, url = resolved, type = ExtractorLinkType.VIDEO) {
-            this.referer = url
-            this.quality = Qualities.Unknown.value
-        }
-    )
+        val scriptTag = doc.selectFirst("script:containsData(url)")?.toString() ?: ""
+        val link = if (url.contains("vcloud", true)) extractDoubleAtob(scriptTag) ?: ""
+            else Regex("var url = '([^']*)'").find(scriptTag)?.groupValues?.get(1) ?: ""
+        if (link.isEmpty()) return
+        val resolved = if (!link.startsWith("http")) getBaseUrl(url) + link else link
+        callback.invoke(
+            newExtractorLink(
+                source = name,
+                name = displayName("VCloud"),
+                url = resolved,
+                type = ExtractorLinkType.VIDEO
+            ) {
+                this.referer = url
+                this.quality = getIndexQuality(qualityLabel)
+            }
+        )
     }
 }
 
