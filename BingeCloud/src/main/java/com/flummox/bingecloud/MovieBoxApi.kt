@@ -12,9 +12,6 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
-// ─────────────────────────────────────────
-//  Constants
-// ─────────────────────────────────────────
 private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
 private const val MB_SECRET_ALT_B64 = "XQn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
 private const val MB_VERSION_CODE = 50020126L
@@ -34,9 +31,6 @@ private val MB_HOSTS = listOf(
 private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
 private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
 
-// ─────────────────────────────────────────
-//  Device ID + client info
-// ─────────────────────────────────────────
 private val mbDeviceIdLock = Any()
 private var mbDeviceId: String? = null
 
@@ -55,9 +49,6 @@ private fun clientInfo(): String {
     return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"official","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
 }
 
-// ─────────────────────────────────────────
-//  Crypto
-// ─────────────────────────────────────────
 private fun md5Hex(data: ByteArray): String {
     val md = MessageDigest.getInstance("MD5")
     return md.digest(data).joinToString("") { "%02x".format(it) }
@@ -132,9 +123,6 @@ private fun generateXTrSignature(
     return "$ts|2|${b64Encode(sig)}"
 }
 
-// ─────────────────────────────────────────
-//  Header builder
-// ─────────────────────────────────────────
 private fun buildHeaders(
     method: String,
     url: String,
@@ -160,9 +148,6 @@ private fun buildHeaders(
     return map
 }
 
-// ─────────────────────────────────────────
-//  Session
-// ─────────────────────────────────────────
 private var mbSession: String? = null
 
 private suspend fun bootstrapToken(): String? {
@@ -192,9 +177,6 @@ private suspend fun ensureSession(): String? {
     return bootstrapToken()
 }
 
-// ─────────────────────────────────────────
-//  GET helper
-// ─────────────────────────────────────────
 private suspend fun mbGet(path: String, query: String? = null, retried: Boolean = false): JSONObject? {
     val session = ensureSession() ?: run {
         BCLog.e("MB: no session for GET $path"); return null
@@ -223,11 +205,14 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
     return null
 }
 
-// ─────────────────────────────────────────
-//  Public API
-// ─────────────────────────────────────────
 data class MBSubject(val subjectId: String, val title: String, val year: Int?, val type: Int)
-data class MBStream(val url: String, val quality: String, val size: String?, val signCookie: String? = null)
+data class MBStream(
+    val url: String,
+    val quality: String,
+    val size: String?,
+    val signCookie: String? = null,
+    val audio: String? = null
+)
 
 suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     val session = ensureSession() ?: run {
@@ -294,25 +279,40 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<M
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     BCLog.d("MB play: $q")
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
-    BCLog.d("MB play resp: ${json.toString().take(400)}")
+    // Full dump — 3000 chars covers ~6-8 stream entries
+    BCLog.d("MB play resp: ${json.toString().take(3000)}")
     val root = json.optJSONObject("data") ?: json
     val arr = root.optJSONArray("streams")
         ?: root.optJSONArray("videos")
         ?: root.optJSONArray("list")
         ?: return emptyList()
+    BCLog.d("MB play: array len=${arr.length()}")
     val out = mutableListOf<MBStream>()
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
+
         val resolutionsStr = o.optString("resolutions").ifBlank { null }
         val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
             if (it.toIntOrNull() != null) "${it}p" else it
         } ?: o.optString("quality").ifBlank { "Auto" }
+
         val size = o.optString("size").ifBlank { null }
         val signCookie = o.optString("signCookie").ifBlank { null }
-        out.add(MBStream(url, quality, size, signCookie))
+
+        // Try multiple likely field names for audio language
+        val audio = o.optString("audioLanguage")
+            .ifBlank { o.optString("audio_language") }
+            .ifBlank { o.optString("language") }
+            .ifBlank { o.optString("audio") }
+            .ifBlank { o.optString("classify") }
+            .ifBlank { o.optString("audioName") }
+            .ifBlank { o.optString("track") }
+            .ifBlank { null }
+
+        out.add(MBStream(url, quality, size, signCookie, audio))
     }
-    BCLog.d("MB play: ${out.size} streams")
+    BCLog.d("MB play: ${out.size} streams (audio labels: ${out.map { it.audio }.distinct()})")
     return out
 }
