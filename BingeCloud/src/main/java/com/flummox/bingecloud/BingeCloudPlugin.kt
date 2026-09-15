@@ -1,9 +1,3 @@
-/*
- * FLUMMOX Repo — CloudStream 3 Extension Repository
- * Copyright (C) 2026 FlummoxGamer
- * GPL-3.0-or-later
- */
-
 package com.flummox.bingecloud
 
 import android.content.Context
@@ -26,11 +20,10 @@ class BingeCloudPlugin : Plugin() {
         com.flummox.bingecore.Prewarm.fire()
 
         registerMainAPI(BingeCloudProvider())
-        registerMainAPI(GogoAnimeProvider())   // ← new
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
         registerExtractorAPI(Filepress())
-        registerExtractorAPI(GogoCdn())        // ← new
+        registerExtractorAPI(GogoCdn())
 
         this.openSettings = { ctx: Context ->
             Settings.showSettingsDialog(ctx) {
