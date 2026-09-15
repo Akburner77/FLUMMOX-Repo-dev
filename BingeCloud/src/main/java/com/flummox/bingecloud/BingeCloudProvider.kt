@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -19,6 +20,7 @@ import java.util.Calendar
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
+private const val PREFETCH_DEBOUNCE_MS = 800L
 
 private val PREFETCH_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 private var activePrefetchJob: Job? = null
@@ -39,8 +41,9 @@ open class BingeCloudProvider : MainAPI() {
             .mapNotNull { key ->
                 val spec = Settings.getRowSpecByKey(key) ?: return@mapNotNull null
                 if (!Settings.isRowEnabled(key)) return@mapNotNull null
-                val id = if (spec.defaultGenre != null) "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
-                    else spec.catalogId
+                val id = if (spec.defaultGenre != null)
+                    "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
+                else spec.catalogId
                 "${spec.type}$ROW_TAG$id$ROW_TAG${spec.name}" to spec.name
             }.toTypedArray()
     )
@@ -105,14 +108,18 @@ open class BingeCloudProvider : MainAPI() {
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
+        // ── prefetch: debounced 800ms, only fires if user actually stays on this page ──
         if (Settings.isPrefetchEnabled()) {
             val prefetchQuery: StreamQuery? = when {
-                tvType == TvType.Movie -> StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
+                tvType == TvType.Movie && videos.isEmpty() ->
+                    StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
                 videos.isNotEmpty() -> {
                     val first = videos.firstOrNull()
                     val s = first?.season
                     val e = first?.episode
-                    if (s != null && e != null) StreamQuery(name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "", s, e)
+                    // skip when season is missing or zero — wrong target
+                    if (s != null && e != null && s > 0)
+                        StreamQuery(name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "", s, e)
                     else null
                 }
                 else -> null
@@ -123,6 +130,8 @@ open class BingeCloudProvider : MainAPI() {
                     activePrefetchJob?.cancel()
                     activePrefetchJob = PREFETCH_SCOPE.launch {
                         try {
+                            delay(PREFETCH_DEBOUNCE_MS)
+                            if (BCCache.getMirrors(key) != null) return@launch
                             BCLog.d("smart prefetch: ${prefetchQuery.title} S${prefetchQuery.season}E${prefetchQuery.episode}")
                             val mirrors = scrapeAllSources(prefetchQuery)
                             BCCache.putMirrors(key, mirrors)
@@ -179,7 +188,7 @@ open class BingeCloudProvider : MainAPI() {
         }
     }
 
-    // ── loadLinks: score + sort + no drop ──
+    // ── loadLinks ──
     override suspend fun loadLinks(
         data: String, isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -193,7 +202,6 @@ open class BingeCloudProvider : MainAPI() {
         if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
         if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
-        // ── 1. score every mirror (no network), sort by score desc then quality ──
         val scored = mirrors
             .map { it to LinkScore.prelimScore(it) }
             .sortedWith(
@@ -203,23 +211,22 @@ open class BingeCloudProvider : MainAPI() {
             )
 
         // ── final display order: preferred quality → score → quality → audio pref ──
-         val pref = Settings.getQualityPref()
-         val prefRank = qualityRank(pref)
-         val finalOrder = scored.sortedWith(
-             compareByDescending<Pair<ScrapedMirror, Int>> {
-           if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
-         }
-         .thenByDescending { it.second }
-         .thenByDescending { qualityRank(it.first.quality) }
-         .thenBy { audioPriority(it.first.mirror, it.first.source) }
-         )
+        val pref = Settings.getQualityPref()
+        val prefRank = qualityRank(pref)
+        val finalOrder = scored.sortedWith(
+            compareByDescending<Pair<ScrapedMirror, Int>> {
+                if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+            }
+                .thenByDescending { it.second }
+                .thenByDescending { qualityRank(it.first.quality) }
+                .thenBy { audioPriority(it.first.mirror, it.first.source) }
+        )
 
         val concurrency = Settings.getConcurrency().coerceIn(1, 50)
         BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency)")
 
         val sem = Semaphore(concurrency)
 
-        // ── 2. resolve in parallel, callbacks invoked in sorted order ──
         val perMirror: List<List<ExtractorLink>> = coroutineScope {
             finalOrder.map { (m, score) ->
                 async {
@@ -251,11 +258,8 @@ open class BingeCloudProvider : MainAPI() {
                                     val bag = mutableListOf<ExtractorLink>()
                                     VCloud(m.source, m.mirror, m.quality, emoji)
                                         .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
-                                    if (bag.isEmpty()) {
-                                        HostHealth.recordFailure(hostOf(m.url))
-                                    } else {
-                                        HostHealth.recordSuccess(hostOf(m.url))
-                                    }
+                                    if (bag.isEmpty()) HostHealth.recordFailure(hostOf(m.url))
+                                    else HostHealth.recordSuccess(hostOf(m.url))
                                     bag
                                 }
                             }
@@ -272,7 +276,7 @@ open class BingeCloudProvider : MainAPI() {
         perMirror.flatten().forEach { callback.invoke(it) }
         BCLog.d("loadLinks done (${perMirror.flatten().size} links)")
 
-        // ── 3. prefetch next episode ──
+        // ── prefetch next episode ──
         if (Settings.isPrefetchEnabled() && query.type == "series"
             && query.nextSeason > 0 && query.nextEpisode > 0) {
             val nextQ = StreamQuery(
