@@ -202,13 +202,17 @@ open class BingeCloudProvider : MainAPI() {
                     .thenBy { audioPriority(it.first.mirror, it.first.source) }
             )
 
-        val pref = Settings.getQualityPref()
-        val prefRank = qualityRank(pref)
-        val finalOrder = scored.sortedWith(
-            compareByDescending<Pair<ScrapedMirror, Int>> {
-                if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
-            }.thenByDescending { it.second }
-        )
+        // ── final display order: preferred quality → score → quality → audio pref ──
+         val pref = Settings.getQualityPref()
+         val prefRank = qualityRank(pref)
+         val finalOrder = scored.sortedWith(
+             compareByDescending<Pair<ScrapedMirror, Int>> {
+           if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+         }
+         .thenByDescending { it.second }
+         .thenByDescending { qualityRank(it.first.quality) }
+         .thenBy { audioPriority(it.first.mirror, it.first.source) }
+         )
 
         val concurrency = Settings.getConcurrency().coerceIn(1, 50)
         BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency)")
