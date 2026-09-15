@@ -35,7 +35,7 @@ import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
 // ══════════════════════════════════════════════════════════════
-// ── ROW SPEC: describes a homepage row ──
+// ── ROW SPEC ──
 // ══════════════════════════════════════════════════════════════
 data class RowSpec(
     val key: String,
@@ -47,7 +47,7 @@ data class RowSpec(
 )
 
 // ══════════════════════════════════════════════════════════════
-// ── SETTINGS OBJECT ──
+// ── SETTINGS ──
 // ══════════════════════════════════════════════════════════════
 object Settings {
 
@@ -93,9 +93,9 @@ object Settings {
 
     val DEFAULT_CF_DOMAINS = emptyList<String>()
 
-    // ══════════════════════════════════════════════════════════════
-    // ── ALL ROWS: homepage catalog definitions ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── ALL ROWS ──
+    // ══════════════════════════════════════════════════════════
     val ALL_ROWS: List<RowSpec> = listOf(
         RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
         RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
@@ -149,6 +149,9 @@ object Settings {
 
     fun getRowSpecByKey(key: String): RowSpec? = ALL_ROWS.firstOrNull { it.key == key }
 
+    fun isRowEnabled(key: String): Boolean =
+        getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
+
     // ── basic prefs ──
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 50).coerceIn(1, 50)
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
@@ -171,13 +174,15 @@ object Settings {
         setKey(K_CF_DOMAINS, cur.joinToString(","))
     }
 
-    // ── FebBox token ──
+    // ── MovieBox session ──
     fun getMbToken(): String? = getKey<String>(K_MB_TOKEN)?.takeIf { it.isNotBlank() }
     fun getMbTokenExp(): Long = getKey<Long>(K_MB_TOKEN_EXP) ?: 0L
     fun saveMbToken(token: String, expMs: Long) {
-    setKey(K_MB_TOKEN, token)
-    setKey(K_MB_TOKEN_EXP, expMs)
+        setKey(K_MB_TOKEN, token)
+        setKey(K_MB_TOKEN_EXP, expMs)
     }
+
+    // ── FebBox token ──
     fun getFebBoxToken(): String = getKey<String>(K_FEBBOX_TOKEN) ?: ""
     fun saveFebBoxToken(t: String) { setKey(K_FEBBOX_TOKEN, t) }
     fun clearFebBoxToken() { setKey(K_FEBBOX_TOKEN, "") }
@@ -189,13 +194,9 @@ object Settings {
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
 
-    // ── row enabled check ──
-    fun isRowEnabled(key: String): Boolean =
-        getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
-
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     // ── COLORS ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     private const val BG = 0xFF0A0D14.toInt()
     private const val SKY_TOP = 0xFF1E3A5F.toInt()
     private const val SKY_MID = 0xFF142238.toInt()
@@ -216,9 +217,9 @@ object Settings {
     private const val DISABLED = 0xFF3A4555.toInt()
     private const val LOG_TEXT = 0xFFB8C4D4.toInt()
 
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     // ── SHAPE HELPERS ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     private fun dp(ctx: Context, v: Int): Int =
         (v * ctx.resources.displayMetrics.density).toInt()
 
@@ -264,9 +265,9 @@ object Settings {
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ── SHOOTING STARS: header animation ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── SHOOTING STARS ──
+    // ══════════════════════════════════════════════════════════
     private class ShootingStarsView(context: Context) : View(context) {
         private data class Star(
             var x: Float, var y: Float, var vx: Float, var vy: Float,
@@ -328,9 +329,9 @@ object Settings {
         }
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ── CARD: collapsible UI element ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── CARD BUILDER ──
+    // ══════════════════════════════════════════════════════════
     private class Card(
         val root: LinearLayout,
         val body: LinearLayout,
@@ -401,9 +402,9 @@ object Settings {
         return Card(root, bodyLayout, status, chev)
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ── REUSABLE ROW BUILDERS ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── REUSABLE ROWS ──
+    // ══════════════════════════════════════════════════════════
     private fun toggleRow(
         ctx: Context, label: String, desc: String?, initial: Boolean,
         onChange: (Boolean) -> Unit
@@ -613,7 +614,6 @@ object Settings {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(ctx, 6) }
         }
-
         row.addView(TextView(ctx).apply {
             text = "${position + 1}"
             setTextColor(SUBTEXT); textSize = 12f
@@ -622,7 +622,6 @@ object Settings {
             layoutParams = LinearLayout.LayoutParams(s, s)
             background = bg(INPUT, 12, ctx)
         })
-
         val col = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
@@ -638,20 +637,18 @@ object Settings {
             setPadding(0, dp(ctx, 2), 0, 0)
         })
         row.addView(col)
-
         val sw = Switch(ctx)
         sw.isChecked = isRowEnabled(spec.key)
         sw.setOnCheckedChangeListener { _: CompoundButton, v: Boolean -> onToggle(v) }
         row.addView(sw)
-
         row.addView(makeArrowBtn(ctx, "▲", position > 0) { onMoveUp() })
         row.addView(makeArrowBtn(ctx, "▼", position < total - 1) { onMoveDown() })
         return row
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ── MAIN SETTINGS DIALOG ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── MAIN DIALOG ──
+    // ══════════════════════════════════════════════════════════
     fun showSettingsDialog(ctx: Context, onSaved: () -> Unit) {
         lateinit var dialog: AlertDialog
 
@@ -660,7 +657,7 @@ object Settings {
             background = bg(BG, 0, ctx)
         }
 
-        // ── header with sky gradient + shooting stars ──
+        // ── header ──
         run {
             val headerFrame = FrameLayout(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -704,18 +701,26 @@ object Settings {
         }
         scroll.addView(body)
 
-        // ── Performance card ──
+        // ══════════════════════════════════════════════════════════
+        // ── PERFORMANCE ──
+        // ══════════════════════════════════════════════════════════
         run {
-             val c = buildCard(ctx, "🧪", "Link Sorting", "Rank links by confidence")
-             c.body.addView(toggleRow(
-                         ctx, "Smart link sorting",
-                         "Score and rank by reliability (🟢🟡🔴)",
-                         isPrefilterEnabled()
-                     ) { setKey(K_PREFILTER, it) })
-                     body.addView(c.root)
-                }
+            val c = buildCard(ctx, "⚡", "Performance", "Control scraping speed")
+            c.body.addView(stepperRow(
+                ctx, "Concurrency", "Providers running in parallel",
+                1, 50, getConcurrency()
+            ) { setKey(K_CONCURRENCY, it) })
+            c.body.addView(toggleRow(
+                ctx, "Smart prefetch",
+                "Pre-cache current + next episode in background",
+                isPrefetchEnabled()
+            ) { setKey(K_PREFETCH, it) })
+            body.addView(c.root)
+        }
 
-        // ── Cloudflare bypass card ──
+        // ══════════════════════════════════════════════════════════
+        // ── CLOUDFLARE BYPASS ──
+        // ══════════════════════════════════════════════════════════
         run {
             val saved = getCfDomains()
             val c = buildCard(
@@ -727,7 +732,6 @@ object Settings {
             )
             c.body.addView(labelBlock(ctx, "Protected sites",
                 "Open a WebView, solve the challenge, tap Save Cookies."))
-
             if (saved.isEmpty()) {
                 c.body.addView(TextView(ctx).apply {
                     text = "No domains saved yet. Add one below."
@@ -749,7 +753,6 @@ object Settings {
                     ))
                 }
             }
-
             c.body.addView(actionRow(
                 ctx, "Add custom domain", "Open any URL to solve CF",
                 "Add"
@@ -757,7 +760,9 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── FebBox card ──
+        // ══════════════════════════════════════════════════════════
+        // ── FEBBOX ACCOUNT ──
+        // ══════════════════════════════════════════════════════════
         run {
             val has = getFebBoxToken().isNotBlank()
             val c = buildCard(
@@ -797,7 +802,9 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── Sources card ──
+        // ══════════════════════════════════════════════════════════
+        // ── SOURCES ──
+        // ══════════════════════════════════════════════════════════
         run {
             val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox()).count { it }
             val c = buildCard(
@@ -811,7 +818,9 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── Preferred quality ──
+        // ══════════════════════════════════════════════════════════
+        // ── PREFERRED QUALITY ──
+        // ══════════════════════════════════════════════════════════
         run {
             val cur = getQualityPref()
             val c = buildCard(ctx, "🎞️", "Preferred Quality", "Current: $cur")
@@ -836,24 +845,27 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── Link Validation (prefilter) ──
+        // ══════════════════════════════════════════════════════════
+        // ── LINK RANKING ──
+        // ══════════════════════════════════════════════════════════
         run {
-            val c = buildCard(ctx, "🧪", "Link Validation", "Pre-filter dead links")
+            val c = buildCard(ctx, "🎯", "Link Ranking", "Score and order by reliability")
             c.body.addView(toggleRow(
-                ctx, "Pre-filter unreachable",
-                "Test each link before showing it (slightly slower)",
+                ctx, "Smart link ranking",
+                "Rank links by confidence (🟢🟡🔴)",
                 isPrefilterEnabled()
             ) { setKey(K_PREFILTER, it) })
             body.addView(c.root)
         }
 
-        // ── Debug Logs ──
+        // ══════════════════════════════════════════════════════════
+        // ── DEBUG LOGS ──
+        // ══════════════════════════════════════════════════════════
         run {
             val c = buildCard(
                 ctx, "🐞", "Debug Logs",
                 "Local · ${BCLog.count()} lines • tap ▸ to expand"
             )
-
             val logView = TextView(ctx).apply {
                 typeface = Typeface.MONOSPACE
                 textSize = 10f
@@ -862,7 +874,6 @@ object Settings {
                 setTextIsSelectable(false)
                 text = BCLog.allSanitized()
             }
-
             val logScroll = ScrollView(ctx).apply {
                 background = bg(INPUT, 8, ctx)
                 isVerticalScrollBarEnabled = false
@@ -874,7 +885,6 @@ object Settings {
             logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
 
             val logScrollbar = LogScrollbar(ctx, logScroll)
-
             val logRow = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -894,7 +904,6 @@ object Settings {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 4))
             }
-
             fun smallBtn(label: String, color: Int, onClick: () -> Unit) = Button(ctx).apply {
                 text = label
                 textSize = 12f
@@ -908,7 +917,6 @@ object Settings {
                 ).apply { leftMargin = dp(ctx, 3); rightMargin = dp(ctx, 3) }
                 setOnClickListener { onClick() }
             }
-
             btnRow.addView(smallBtn("Refresh", ACCENT_STRONG) {
                 logView.text = BCLog.allSanitized()
                 logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
@@ -955,13 +963,14 @@ object Settings {
                 BCLog.clear()
                 logView.text = "(cleared)"
             })
-
             c.body.addView(logRow)
             c.body.addView(btnRow)
             body.addView(c.root)
         }
 
-        // ── Homepage rows card ──
+        // ══════════════════════════════════════════════════════════
+        // ── HOMEPAGE ──
+        // ══════════════════════════════════════════════════════════
         run {
             val c = buildCard(
                 ctx, "🏠", "Homepage", "Tap ▲▼ to reorder sections"
@@ -1073,9 +1082,9 @@ object Settings {
         dialog.show()
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ── CF WebView ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── CF WEBVIEW ──
+    // ══════════════════════════════════════════════════════════
     @SuppressLint("SetJavaScriptEnabled")
     private fun openCfWebView(ctx: Context, startUrl: String, domain: String) {
         val dlg = Dialog(ctx)
@@ -1121,7 +1130,6 @@ object Settings {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         layout.addView(wvWrap)
-
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             background = bg(SKY_MID, 0, ctx)
@@ -1163,9 +1171,9 @@ object Settings {
         dlg.show()
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ── FebBox login WebView ──
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
+    // ── FEBBOX LOGIN WEBVIEW ──
+    // ══════════════════════════════════════════════════════════
     @SuppressLint("SetJavaScriptEnabled")
     private fun openFebBoxLogin(ctx: Context, onSaved: () -> Unit) {
         val dlg = Dialog(ctx)
@@ -1208,7 +1216,6 @@ object Settings {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         layout.addView(wvWrap)
-
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             background = bg(SKY_MID, 0, ctx)
