@@ -698,18 +698,14 @@ object Settings {
 
         // ── Performance card ──
         run {
-            val c = buildCard(ctx, "⚡", "Performance", "Control scraping speed")
-            c.body.addView(stepperRow(
-                ctx, "Concurrency", "Providers running in parallel",
-                1, 50, getConcurrency()
-            ) { setKey(K_CONCURRENCY, it) })
-            c.body.addView(toggleRow(
-                ctx, "Smart prefetch",
-                "Pre-cache current + next episode in background",
-                isPrefetchEnabled()
-            ) { setKey(K_PREFETCH, it) })
-            body.addView(c.root)
-        }
+             val c = buildCard(ctx, "🧪", "Link Sorting", "Rank links by confidence")
+             c.body.addView(toggleRow(
+                         ctx, "Smart link sorting",
+                         "Score and rank by reliability (🟢🟡🔴)",
+                         isPrefilterEnabled()
+                     ) { setKey(K_PREFILTER, it) })
+                     body.addView(c.root)
+                }
 
         // ── Cloudflare bypass card ──
         run {
