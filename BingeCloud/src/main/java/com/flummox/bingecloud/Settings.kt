@@ -799,19 +799,21 @@ run {
         "${BCLog.count()} lines • tap ▸ to expand"
     )
 
+    // Fixed-height scroll container. Android's nested-scroll handles
+    // outer scroll automatically when this inner one hits top/bottom.
     val logView = TextView(ctx).apply {
         typeface = Typeface.MONOSPACE
         textSize = 10f
         setTextColor(LOG_TEXT)
         background = bg(INPUT, 8, ctx)
         setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
-        setTextIsSelectable(false)   // off so ScrollView owns vertical gesture
+        setTextIsSelectable(false)
         text = BCLog.allSanitized()
     }
 
     val logScroll = ScrollView(ctx).apply {
         layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 420)
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 260)
         ).apply {
             leftMargin = dp(ctx, 8)
             rightMargin = dp(ctx, 8)
@@ -819,17 +821,14 @@ run {
         }
         background = bg(INPUT, 8, ctx)
         isVerticalScrollBarEnabled = true
+        isScrollbarFadingEnabled = false
         scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
-        isClickable = true
-        isFocusable = true
-        setOnTouchListener { v, _ ->
-            v.parent?.requestDisallowInterceptTouchEvent(true)
-            false
-        }
+        isFillViewport = false
     }
     logScroll.addView(logView, ViewGroup.LayoutParams(
-    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-))
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ))
+    logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
 
     val btnRow = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -876,15 +875,14 @@ run {
                     ctx.contentResolver.openOutputStream(it)?.use { os ->
                         os.write(content.toByteArray())
                     }
-                    Toast.makeText(ctx, "Saved: Downloads/$fname", Toast.LENGTH_LONG).show()
+                    Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
                 } ?: Toast.makeText(ctx, "Save failed", Toast.LENGTH_SHORT).show()
             } else {
                 val dir = android.os.Environment
                     .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                 dir.mkdirs()
-                val f = java.io.File(dir, fname)
-                f.writeText(content)
-                Toast.makeText(ctx, "Saved: ${f.absolutePath}", Toast.LENGTH_LONG).show()
+                java.io.File(dir, fname).writeText(content)
+                Toast.makeText(ctx, "Saved to Downloads/$fname", Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             Toast.makeText(ctx, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -893,7 +891,7 @@ run {
     btnRow.addView(smallBtn("Copy", ACCENT_STRONG) {
         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("BingeCloud Logs", BCLog.allSanitized()))
-        Toast.makeText(ctx, "Copied (sanitized)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
     })
     btnRow.addView(smallBtn("Clear", RED) {
         BCLog.clear()
