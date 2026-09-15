@@ -197,20 +197,22 @@ open class BingeCloudProvider : MainAPI() {
 
                                 val cookieHeader: String = m.headers?.get("Cookie") ?: ""
                                 BCLog.d("MB cookie len=${cookieHeader.length} url=${m.url.take(120)}")
-                                try {
-                                    val testRes = com.lagradost.cloudstream3.app.get(
-                                        m.url,
-                                        headers = mapOf(
-                                            "Cookie" to cookieHeader,
-                                            "User-Agent" to "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
-                                        ),
-                                        timeout = 6000L
-                                    )
-                                    BCLog.d("MB test GET -> ${testRes.code} bodyLen=${testRes.text.length}")
-                                } catch (e: Exception) {
-                                    BCLog.e("MB test failed: ${e.message}")
-                                }
-
+                                // Only probe DASH manifests — direct .mp4 files are huge and don't need validation
+                                if (m.url.contains(".mpd", true)) {
+                                   try {
+                                       val testRes = com.lagradost.cloudstream3.app.get(
+                                           m.url,
+                                           headers = mapOf(
+                                               "Cookie" to cookieHeader,
+                                               "User-Agent" to "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+                                           ),
+                                           timeout = 6000L
+                                      )
+                                      BCLog.d("MB test GET -> ${testRes.code} bodyLen=${testRes.text.length}")
+                                  } catch (e: Exception) {
+                                      BCLog.e("MB test failed: ${e.message}")
+                                  }
+}
                                 val mbHeaders: Map<String, String>? = m.headers
                                 callback.invoke(
                                     newExtractorLink(
