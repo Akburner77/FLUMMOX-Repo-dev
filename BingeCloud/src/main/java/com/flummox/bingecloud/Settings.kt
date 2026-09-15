@@ -63,6 +63,7 @@ object Settings {
     const val K_SRC_HDH = "bingecloud_src_hdh"
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
     const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
+    const val K_SRC_GOGO = "bingecloud_src_gogo"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
     const val K_PREFETCH = "bingecloud_prefetch"
@@ -193,6 +194,7 @@ object Settings {
     fun isSrcHdh(): Boolean = getKey<Boolean>(K_SRC_HDH) ?: true
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
+    fun isSrcGogo(): Boolean = getKey<Boolean>(K_SRC_GOGO) ?: true
 
     // ══════════════════════════════════════════════════════════
     // ── COLORS ──
@@ -701,9 +703,7 @@ object Settings {
         }
         scroll.addView(body)
 
-        // ══════════════════════════════════════════════════════════
         // ── PERFORMANCE ──
-        // ══════════════════════════════════════════════════════════
         run {
             val c = buildCard(ctx, "⚡", "Performance", "Control scraping speed")
             c.body.addView(stepperRow(
@@ -718,9 +718,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── CLOUDFLARE BYPASS ──
-        // ══════════════════════════════════════════════════════════
         run {
             val saved = getCfDomains()
             val c = buildCard(
@@ -760,9 +758,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── FEBBOX ACCOUNT ──
-        // ══════════════════════════════════════════════════════════
         run {
             val has = getFebBoxToken().isNotBlank()
             val c = buildCard(
@@ -802,25 +798,22 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── SOURCES ──
-        // ══════════════════════════════════════════════════════════
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox()).count { it }
+            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcGogo()).count { it }
             val c = buildCard(
-                ctx, "📡", "Sources", "$on of 4 enabled",
-                badge = "$on/4"
+                ctx, "📡", "Sources", "$on of 5 enabled",
+                badge = "$on/5"
             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
             c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
+            c.body.addView(toggleRow(ctx, "GogoAnime", "Anime only", isSrcGogo()) { setKey(K_SRC_GOGO, it) })
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── PREFERRED QUALITY ──
-        // ══════════════════════════════════════════════════════════
         run {
             val cur = getQualityPref()
             val c = buildCard(ctx, "🎞️", "Preferred Quality", "Current: $cur")
@@ -845,9 +838,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── LINK RANKING ──
-        // ══════════════════════════════════════════════════════════
         run {
             val c = buildCard(ctx, "🎯", "Link Ranking", "Score and order by reliability")
             c.body.addView(toggleRow(
@@ -858,9 +849,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── DEBUG LOGS ──
-        // ══════════════════════════════════════════════════════════
         run {
             val c = buildCard(
                 ctx, "🐞", "Debug Logs",
@@ -968,9 +957,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ══════════════════════════════════════════════════════════
         // ── HOMEPAGE ──
-        // ══════════════════════════════════════════════════════════
         run {
             val c = buildCard(
                 ctx, "🏠", "Homepage", "Tap ▲▼ to reorder sections"
@@ -1082,9 +1069,7 @@ object Settings {
         dialog.show()
     }
 
-    // ══════════════════════════════════════════════════════════
     // ── CF WEBVIEW ──
-    // ══════════════════════════════════════════════════════════
     @SuppressLint("SetJavaScriptEnabled")
     private fun openCfWebView(ctx: Context, startUrl: String, domain: String) {
         val dlg = Dialog(ctx)
@@ -1171,9 +1156,7 @@ object Settings {
         dlg.show()
     }
 
-    // ══════════════════════════════════════════════════════════
     // ── FEBBOX LOGIN WEBVIEW ──
-    // ══════════════════════════════════════════════════════════
     @SuppressLint("SetJavaScriptEnabled")
     private fun openFebBoxLogin(ctx: Context, onSaved: () -> Unit) {
         val dlg = Dialog(ctx)
