@@ -792,71 +792,118 @@ object Settings {
         }
 
         // ── Debug Logs ──
-        run {
-            val c = buildCard(
-                ctx, "🐞", "Debug Logs",
-                "${BCLog.count()} lines • tap ▸ to expand"
-            )
+        // ── Debug Logs ──
+run {
+    val c = buildCard(
+        ctx, "🐞", "Debug Logs",
+        "${BCLog.count()} lines • tap ▸ to expand"
+    )
 
-            val logView = TextView(ctx).apply {
-                typeface = Typeface.MONOSPACE
-                textSize = 10f
-                setTextColor(LOG_TEXT)
-                background = bg(INPUT, 8, ctx)
-                setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
-                setTextIsSelectable(true)
-                text = BCLog.all()
-            }
+    val logView = TextView(ctx).apply {
+        typeface = Typeface.MONOSPACE
+        textSize = 10f
+        setTextColor(LOG_TEXT)
+        background = bg(INPUT, 8, ctx)
+        setPadding(dp(ctx, 10), dp(ctx, 10), dp(ctx, 10), dp(ctx, 10))
+        setTextIsSelectable(false)   // off so ScrollView owns vertical gesture
+        text = BCLog.allSanitized()
+    }
 
-            val logScroll = ScrollView(ctx).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 320)
-                ).apply {
-                    leftMargin = dp(ctx, 8)
-                    rightMargin = dp(ctx, 8)
-                    bottomMargin = dp(ctx, 6)
-                }
-                background = bg(INPUT, 8, ctx)
-            }
-            logScroll.addView(logView)
-
-            val btnRow = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 4))
-            }
-
-            fun smallBtn(label: String, color: Int, onClick: () -> Unit) = Button(ctx).apply {
-                text = label
-                textSize = 12f
-                setTextColor(color)
-                background = accentPill(ctx)
-                isAllCaps = false
-                setPadding(dp(ctx, 12), dp(ctx, 6), dp(ctx, 12), dp(ctx, 6))
-                minHeight = 0; minWidth = 0
-                layoutParams = LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-                ).apply { leftMargin = dp(ctx, 4); rightMargin = dp(ctx, 4) }
-                setOnClickListener { onClick() }
-            }
-
-            btnRow.addView(smallBtn("Refresh", ACCENT_STRONG) {
-                logView.text = BCLog.all()
-                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
-            })
-            btnRow.addView(smallBtn("Copy", ACCENT_STRONG) {
-                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("BingeCloud Logs", BCLog.all()))
-                Toast.makeText(ctx, "Logs copied", Toast.LENGTH_SHORT).show()
-            })
-            btnRow.addView(smallBtn("Clear", RED) {
-                BCLog.clear()
-                logView.text = "(cleared)"
-            })
-
-            c.body.addView(logScroll)
-            c.body.addView(btnRow)
-            body.addView(c.root)
+    val logScroll = ScrollView(ctx).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 420)
+        ).apply {
+            leftMargin = dp(ctx, 8)
+            rightMargin = dp(ctx, 8)
+            bottomMargin = dp(ctx, 6)
         }
+        background = bg(INPUT, 8, ctx)
+        isVerticalScrollBarEnabled = true
+        scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+        isClickable = true
+        isFocusable = true
+        setOnTouchListener { v, _ ->
+            v.parent?.requestDisallowInterceptTouchEvent(true)
+            false
+        }
+    }
+    logScroll.addView(logView, ScrollView.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ))
+
+    val btnRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(dp(ctx, 8), 0, dp(ctx, 8), dp(ctx, 4))
+    }
+
+    fun smallBtn(label: String, color: Int, onClick: () -> Unit) = Button(ctx).apply {
+        text = label
+        textSize = 12f
+        setTextColor(color)
+        background = accentPill(ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 10), dp(ctx, 6), dp(ctx, 10), dp(ctx, 6))
+        minHeight = 0; minWidth = 0
+        layoutParams = LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ).apply { leftMargin = dp(ctx, 3); rightMargin = dp(ctx, 3) }
+        setOnClickListener { onClick() }
+    }
+
+    btnRow.addView(smallBtn("Refresh", ACCENT_STRONG) {
+        logView.text = BCLog.allSanitized()
+        logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+    })
+    btnRow.addView(smallBtn("Save", ACCENT_STRONG) {
+        try {
+            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                .format(java.util.Date())
+            val fname = "bingelog_$ts.txt"
+            val content = BCLog.allSanitized()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fname)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(
+                        android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    )
+                }
+                val uri = ctx.contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                )
+                uri?.let {
+                    ctx.contentResolver.openOutputStream(it)?.use { os ->
+                        os.write(content.toByteArray())
+                    }
+                    Toast.makeText(ctx, "Saved: Downloads/$fname", Toast.LENGTH_LONG).show()
+                } ?: Toast.makeText(ctx, "Save failed", Toast.LENGTH_SHORT).show()
+            } else {
+                val dir = android.os.Environment
+                    .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                dir.mkdirs()
+                val f = java.io.File(dir, fname)
+                f.writeText(content)
+                Toast.makeText(ctx, "Saved: ${f.absolutePath}", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(ctx, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    })
+    btnRow.addView(smallBtn("Copy", ACCENT_STRONG) {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("BingeCloud Logs", BCLog.allSanitized()))
+        Toast.makeText(ctx, "Copied (sanitized)", Toast.LENGTH_SHORT).show()
+    })
+    btnRow.addView(smallBtn("Clear", RED) {
+        BCLog.clear()
+        logView.text = "(cleared)"
+    })
+
+    c.body.addView(logScroll)
+    c.body.addView(btnRow)
+    body.addView(c.root)
+}
 
         run {
             val c = buildCard(
