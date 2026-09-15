@@ -14,6 +14,10 @@ import java.util.Calendar
 private const val SEP = "|"
 private const val ROW_TAG = "::"
 
+private val TRAILING_QUALITY = Regex("""[\s·•\-]*\d{3,4}[pP]?\s*$""")
+private fun stripQualityFromServer(s: String): String =
+    s.replace(TRAILING_QUALITY, "").trim()
+
 open class BingeCloudProvider : MainAPI() {
     override var mainUrl = AIOMETA_BASE
     override var name = "BingeCloud"
@@ -197,30 +201,32 @@ open class BingeCloudProvider : MainAPI() {
 
                                 val cookieHeader: String = m.headers?.get("Cookie") ?: ""
                                 BCLog.d("MB cookie len=${cookieHeader.length} url=${m.url.take(120)}")
-                                // Only probe DASH manifests — direct .mp4 files are huge and don't need validation
                                 if (m.url.contains(".mpd", true)) {
-                                   try {
-                                       val testRes = com.lagradost.cloudstream3.app.get(
-                                           m.url,
-                                           headers = mapOf(
-                                               "Cookie" to cookieHeader,
-                                               "User-Agent" to "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
-                                           ),
-                                           timeout = 6000L
-                                      )
-                                      BCLog.d("MB test GET -> ${testRes.code} bodyLen=${testRes.text.length}")
-                                  } catch (e: Exception) {
-                                      BCLog.e("MB test failed: ${e.message}")
-                                  }
-}
+                                    try {
+                                        val testRes = com.lagradost.cloudstream3.app.get(
+                                            m.url,
+                                            headers = mapOf(
+                                                "Cookie" to cookieHeader,
+                                                "User-Agent" to "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+                                            ),
+                                            timeout = 6000L
+                                        )
+                                        BCLog.d("MB test GET -> ${testRes.code} bodyLen=${testRes.text.length}")
+                                    } catch (e: Exception) {
+                                        BCLog.e("MB test failed: ${e.message}")
+                                    }
+                                }
+
                                 val mbHeaders: Map<String, String>? = m.headers
+                                val serverName = stripQualityFromServer(m.mirror).ifBlank { "MovieBox" }
+                                val displayName = "${m.quality} •MB $serverName"
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "MovieBox",
-                                        name = "${m.mirror} · ${m.quality}",
+                                        name = displayName,
                                         url = m.url,
                                         type = linkType
-                                 ) {
+                                    ) {
                                         this.referer = "https://h5.aoneroom.com/"
                                         this.quality = qualityRank(m.quality)
                                             .takeIf { it > 0 } ?: Qualities.Unknown.value
@@ -239,7 +245,7 @@ open class BingeCloudProvider : MainAPI() {
                                 BCLog.d("prefilter dropped: ${m.mirror}")
                                 return@withPermit
                             }
-                            VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
+                            VCloud(m.source, m.mirror, m.quality).getUrl(finalUrl, "", subtitleCallback, callback)
                         } catch (e: Exception) {
                             BCLog.e("${m.mirror} failed: ${e.message}")
                         }
