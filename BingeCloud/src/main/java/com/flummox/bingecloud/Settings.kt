@@ -56,6 +56,8 @@ object Settings {
     const val K_CF_DOMAINS = "bingecloud_cf_domains"
     const val K_CF_COOKIE_PREFIX = "bingecloud_cf_cookie_"
     const val K_FEBBOX_TOKEN = "bingecloud_febbox_token"
+    const val K_MB_TOKEN = "bingecloud_mb_token"
+    const val K_MB_TOKEN_EXP = "bingecloud_mb_token_exp"
     const val K_SRC_VM = "bingecloud_src_vm"
     const val K_SRC_MD = "bingecloud_src_md"
     const val K_SRC_HDH = "bingecloud_src_hdh"
@@ -170,6 +172,12 @@ object Settings {
     }
 
     // ── FebBox token ──
+    fun getMbToken(): String? = getKey<String>(K_MB_TOKEN)?.takeIf { it.isNotBlank() }
+    fun getMbTokenExp(): Long = getKey<Long>(K_MB_TOKEN_EXP) ?: 0L
+    fun saveMbToken(token: String, expMs: Long) {
+    setKey(K_MB_TOKEN, token)
+    setKey(K_MB_TOKEN_EXP, expMs)
+    }
     fun getFebBoxToken(): String = getKey<String>(K_FEBBOX_TOKEN) ?: ""
     fun saveFebBoxToken(t: String) { setKey(K_FEBBOX_TOKEN, t) }
     fun clearFebBoxToken() { setKey(K_FEBBOX_TOKEN, "") }
