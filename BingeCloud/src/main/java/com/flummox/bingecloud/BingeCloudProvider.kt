@@ -3,9 +3,15 @@ package com.flummox.bingecloud
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
@@ -13,6 +19,12 @@ import java.util.Calendar
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
+
+private val PREFETCH_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+private var activePrefetchJob: Job? = null
+
+private fun StreamQuery.cacheKey(): String =
+    "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
 open class BingeCloudProvider : MainAPI() {
     override var mainUrl = AIOMETA_BASE
@@ -27,34 +39,25 @@ open class BingeCloudProvider : MainAPI() {
             .mapNotNull { key ->
                 val spec = Settings.getRowSpecByKey(key) ?: return@mapNotNull null
                 if (!Settings.isRowEnabled(key)) return@mapNotNull null
-                val id = if (spec.defaultGenre != null)
-                    "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
-                else spec.catalogId
+                val id = if (spec.defaultGenre != null) "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
+                    else spec.catalogId
                 "${spec.type}$ROW_TAG$id$ROW_TAG${spec.name}" to spec.name
-            }
-            .toTypedArray()
+            }.toTypedArray()
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val parts = request.data.split(ROW_TAG)
         if (parts.size < 2) return null
-        val type = parts[0]
-        val catalogId = parts[1]
-        val genre = parts.getOrNull(2)
-        val skip = (page - 1) * 25
-        val metas = aioFetchCatalog(type, catalogId, genre, skip)
-        val items = metas.mapNotNull { it.toSearchResponse() }
+        val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+            .mapNotNull { it.toSearchResponse() }
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
         val results = mutableListOf<SearchResponse>()
         for (t in listOf("movie", "series", "anime")) {
-            try {
-                results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() })
-            } catch (e: Exception) {
-                BCLog.e("Search $t failed: ${e.message}")
-            }
+            try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
+            catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
         }
         return results
     }
@@ -82,7 +85,6 @@ open class BingeCloudProvider : MainAPI() {
         val type = parts[0]
         val metaId = parts[1]
         val meta = aioFetchMeta(type, metaId) ?: return null
-
         val name = meta.name ?: return null
         val tvType = when {
             type.contains("series", true) -> TvType.TvSeries
@@ -94,43 +96,64 @@ open class BingeCloudProvider : MainAPI() {
             val n = c.name ?: return@mapNotNull null
             Actor(n, c.photo)
         } ?: emptyList()
-
         val videos = meta.videos ?: emptyList()
         val statusTag = computeStatusTag(meta, videos, tvType)
         val desc = meta.description ?: ""
-        val plotWithStatus = if (statusTag.isNotBlank() && desc.isNotBlank())
-            "<b>$statusTag</b><br><br>$desc"
-        else if (statusTag.isNotBlank())
-            "<b>$statusTag</b>"
-        else desc
+        val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
+            else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
+
+        if (Settings.isPrefetchEnabled()) {
+            val prefetchQuery: StreamQuery? = when {
+                tvType == TvType.Movie -> StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
+                videos.isNotEmpty() -> {
+                    val first = videos.firstOrNull()
+                    val s = first?.season
+                    val e = first?.episode
+                    if (s != null && e != null) StreamQuery(name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "", s, e)
+                    else null
+                }
+                else -> null
+            }
+            if (prefetchQuery != null) {
+                val key = prefetchQuery.cacheKey()
+                if (BCCache.getMirrors(key) == null) {
+                    activePrefetchJob?.cancel()
+                    activePrefetchJob = PREFETCH_SCOPE.launch {
+                        try {
+                            BCLog.d("smart prefetch: ${prefetchQuery.title} S${prefetchQuery.season}E${prefetchQuery.episode}")
+                            val mirrors = scrapeAllSources(prefetchQuery)
+                            BCCache.putMirrors(key, mirrors)
+                            BCLog.d("smart prefetch done: ${mirrors.size} mirrors")
+                        } catch (e: CancellationException) {
+                            BCLog.d("smart prefetch cancelled")
+                        } catch (e: Exception) {
+                            BCLog.e("smart prefetch failed: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
 
         return if (tvType == TvType.Movie && videos.isEmpty()) {
-            val q = StreamQuery(
-                title = name,
-                year = yearInt?.toString() ?: "",
-                type = "movie",
-                imdbId = meta.imdb_id ?: ""
-            )
+            val q = StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
             newMovieLoadResponse(name, url, TvType.Movie, encodeQuery(q)) {
                 this.posterUrl = meta.poster
                 this.backgroundPosterUrl = meta.background
-                this.plot = plotWithStatus
+                this.plot = plot
                 this.year = yearInt
                 this.tags = meta.genres
                 this.score = Score.from10(meta.imdbRating)
                 if (actors.isNotEmpty()) addActors(actors)
             }
         } else {
-            val episodes = videos.mapNotNull { v ->
-                val s = v.season ?: return@mapNotNull null
-                val e = v.episode ?: return@mapNotNull null
+            val episodes = videos.mapIndexedNotNull { idx, v ->
+                val s = v.season ?: return@mapIndexedNotNull null
+                val e = v.episode ?: return@mapIndexedNotNull null
+                val next = videos.getOrNull(idx + 1)
                 val q = StreamQuery(
-                    title = name,
-                    year = yearInt?.toString() ?: "",
-                    type = "series",
-                    season = s,
-                    episode = e,
-                    imdbId = meta.imdb_id ?: ""
+                    name, yearInt?.toString() ?: "", "series", meta.imdb_id ?: "",
+                    s, e,
+                    next?.season ?: 0, next?.episode ?: 0
                 )
                 newEpisode(encodeQuery(q)) {
                     this.name = v.title ?: "Episode $e"
@@ -144,7 +167,7 @@ open class BingeCloudProvider : MainAPI() {
             newTvSeriesLoadResponse(name, url, responseType, episodes) {
                 this.posterUrl = meta.poster
                 this.backgroundPosterUrl = meta.background
-                this.plot = plotWithStatus
+                this.plot = plot
                 this.year = yearInt
                 this.tags = meta.genres
                 this.score = Score.from10(meta.imdbRating)
@@ -154,81 +177,112 @@ open class BingeCloudProvider : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
+        data: String, isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val query = decodeQuery(data) ?: run {
-            BCLog.e("loadLinks: query decode failed")
-            return false
-        }
+        val query = decodeQuery(data) ?: return false
         BCLog.section("loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
 
-        val mirrors = scrapeAllSources(query)
-        if (mirrors.isEmpty()) {
-            BCLog.e("loadLinks: no mirrors, aborting")
-            return false
-        }
+        val cached = BCCache.getMirrors(query.cacheKey())
+        val mirrors = cached ?: scrapeAllSources(query)
+        if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
+        if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
         val pref = Settings.getQualityPref()
         val prefRank = qualityRank(pref)
         val sorted = mirrors.sortedWith(
-            compareByDescending<ScrapedMirror> {
-                if (prefRank > 0 && qualityRank(it.quality) == prefRank) 1 else 0
-            }.thenByDescending { qualityRank(it.quality) }
+            compareBy<ScrapedMirror> { sourcePriority(it.source) }
+                .thenByDescending { if (prefRank > 0 && qualityRank(it.quality) == prefRank) 1 else 0 }
+                .thenByDescending { qualityRank(it.quality) }
+                .thenBy { audioPriority(it.mirror, it.source) }
         )
         val concurrency = Settings.getConcurrency().coerceIn(1, 50)
         val prefilter = Settings.isPrefilterEnabled()
-        BCLog.d("resolving ${sorted.size} mirrors (concurrency=$concurrency, prefilter=$prefilter)")
+        BCLog.d("resolving ${sorted.size} mirrors (c=$concurrency, prefilter=$prefilter)")
 
         val sem = Semaphore(concurrency)
-        coroutineScope {
+
+        // Resolve in parallel, capture into lists, then invoke callbacks in SORTED order.
+        val perMirror: List<List<ExtractorLink>> = coroutineScope {
             sorted.map { m ->
                 async {
                     sem.withPermit {
                         try {
-                            if (m.source == "MB") {
-                                val linkType = when {
-                                    m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
-                                    m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
-                                    else -> ExtractorLinkType.VIDEO
-                                }
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = "MovieBox",
-                                        name = "MovieBox · ${m.quality}",
-                                        url = m.url,
-                                        type = linkType
-                                    ) {
-                                        this.referer = "https://www.febbox.com"
-                                        this.quality = qualityRank(m.quality)
-                                            .takeIf { it > 0 } ?: Qualities.Unknown.value
-                                        if (m.headers != null) this.headers = m.headers
+                            when (m.source) {
+                                "MB" -> {
+                                    val linkType = when {
+                                        m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                        m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                        else -> ExtractorLinkType.VIDEO
                                     }
-                                )
-                                return@withPermit
+                                    val display = "${m.quality} •MB ${m.mirror}"
+                                    BCLog.d("MB link: $display")
+                                    val hdrs = m.headers
+                                    listOf(newExtractorLink("MovieBox", display, m.url, linkType) {
+                                        this.referer = "https://h5.aoneroom.com/"
+                                        if (hdrs != null) this.headers = hdrs
+                                    })
+                                }
+                                else -> {
+                                    val finalUrl = resolveWrapper(m.url)
+                                    if (finalUrl == null) {
+                                        BCLog.d("unresolved: ${m.mirror}")
+                                        emptyList()
+                                    } else if (prefilter && !isHubcloudAlive(finalUrl)) {
+                                        BCLog.d("prefilter drop: ${m.mirror}")
+                                        emptyList()
+                                    } else {
+                                        val bag = mutableListOf<ExtractorLink>()
+                                        VCloud(m.source, m.mirror, m.quality).getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
+                                        bag
+                                    }
+                                }
                             }
-
-                            val finalUrl = resolveWrapper(m.url)
-                            if (finalUrl == null) {
-                                BCLog.d("unresolved: ${m.mirror} ${m.url}")
-                                return@withPermit
-                            }
-                            if (prefilter && !isHubcloudAlive(finalUrl)) {
-                                BCLog.d("prefilter dropped: ${m.mirror}")
-                                return@withPermit
-                            }
-                            VCloud(m.source).getUrl(finalUrl, "", subtitleCallback, callback)
                         } catch (e: Exception) {
                             BCLog.e("${m.mirror} failed: ${e.message}")
+                            emptyList()
                         }
                     }
                 }
             }.awaitAll()
         }
-        BCLog.d("loadLinks done")
+
+        perMirror.flatten().forEach { callback.invoke(it) }
+        BCLog.d("loadLinks done (${perMirror.flatten().size} links)")
+
+        if (Settings.isPrefetchEnabled() && query.type == "series"
+            && query.nextSeason > 0 && query.nextEpisode > 0) {
+            val nextQ = StreamQuery(
+                query.title, query.year, "series", query.imdbId,
+                query.nextSeason, query.nextEpisode
+            )
+            val nextKey = nextQ.cacheKey()
+            if (BCCache.getMirrors(nextKey) == null) {
+                activePrefetchJob?.cancel()
+                activePrefetchJob = PREFETCH_SCOPE.launch {
+                    try {
+                        BCLog.d("smart prefetch next: S${query.nextSeason}E${query.nextEpisode}")
+                        val nextMirrors = scrapeAllSources(nextQ)
+                        BCCache.putMirrors(nextKey, nextMirrors)
+                        BCLog.d("smart prefetch next done: ${nextMirrors.size} mirrors")
+                    } catch (e: CancellationException) {
+                        BCLog.d("smart prefetch next cancelled")
+                    } catch (e: Exception) {
+                        BCLog.e("smart prefetch next failed: ${e.message}")
+                    }
+                }
+            }
+        }
         return true
+    }
+
+    private fun sourcePriority(source: String): Int = when (source) {
+        "MB" -> 0
+        "MD" -> 1
+        "VM" -> 2
+        "HDH" -> 3
+        else -> 9
     }
 
     private fun qualityRank(q: String): Int = when {
@@ -239,6 +293,19 @@ open class BingeCloudProvider : MainAPI() {
         q.contains("480", true) -> 480
         q.contains("360", true) -> 360
         else -> 0
+    }
+
+    private fun audioPriority(mirror: String, source: String): Int {
+        if (source != "MB") return 0
+        val l = mirror.lowercase()
+        return when {
+            l.contains("original") -> 0
+            l.contains("hindi") -> 1
+            l.contains("english") -> 2
+            l.contains("spanish") -> 5
+            l.contains("portug") -> 6
+            else -> 3
+        }
     }
 
     private fun computeStatusTag(meta: AioMeta, videos: List<AioVideo>, tvType: TvType): String {
@@ -257,25 +324,18 @@ open class BingeCloudProvider : MainAPI() {
 
 private fun encodeQuery(q: StreamQuery): String {
     val o = JSONObject()
-    o.put("t", q.title)
-    o.put("y", q.year)
-    o.put("ty", q.type)
-    o.put("s", q.season)
-    o.put("e", q.episode)
-    o.put("i", q.imdbId)
+    o.put("t", q.title); o.put("y", q.year); o.put("ty", q.type)
+    o.put("s", q.season); o.put("e", q.episode); o.put("i", q.imdbId)
+    o.put("ns", q.nextSeason); o.put("ne", q.nextEpisode)
     return o.toString()
 }
 
 private fun decodeQuery(s: String): StreamQuery? = try {
     val o = JSONObject(s)
     StreamQuery(
-        title = o.optString("t"),
-        year = o.optString("y"),
-        type = o.optString("ty", "movie"),
-        season = o.optInt("s", 0),
-        episode = o.optInt("e", 0),
-        imdbId = o.optString("i")
+        o.optString("t"), o.optString("y"),
+        o.optString("ty", "movie"), o.optString("i"),
+        o.optInt("s", 0), o.optInt("e", 0),
+        o.optInt("ns", 0), o.optInt("ne", 0)
     )
-} catch (e: Exception) {
-    null
-}
+} catch (e: Exception) { null }

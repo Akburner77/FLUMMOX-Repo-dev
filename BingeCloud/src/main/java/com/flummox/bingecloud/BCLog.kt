@@ -1,57 +1,107 @@
 package com.flummox.bingecloud
 
+import android.content.Context
 import android.util.Log
+import java.io.BufferedWriter
+import java.io.File
+import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * In-memory ring buffer logger for BingeCloud.
- * Keeps the last 800 lines, thread-safe, shown in Settings → Debug Logs.
- */
 object BCLog {
 
-    private const val MAX_LINES = 800
+    private const val MAX_LINES = 2000
+    private const val MAX_FILE_BYTES = 500_000L
     private const val TAG = "BingeCloud"
 
     private val buffer = ArrayDeque<String>(MAX_LINES)
     private val lock = Any()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
+    private var writer: BufferedWriter? = null
 
-    fun d(message: String) {
-        val line = "[${timeFormat.format(Date())}] $message"
+    private val RX_JWT = Regex("""eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+""")
+    private val RX_BEARER = Regex("""(?i)(bearer\s+)\S+""")
+    private val RX_SIGN_COOKIE = Regex("""(?i)("signCookie"\s*:\s*")[^"]+""")
+    private val RX_COOKIE = Regex("""(?i)(cookie["']?\s*[:=]\s*["']?)[^"\r\n]+""")
+    private val RX_CF = Regex("""(?i)(cloudfront-(?:policy|signature|key-pair-id)=)[^;&"\s]+""")
+
+    private fun sanitize(input: String): String {
+        var s = input
+        s = RX_JWT.replace(s) { "<JWT>" }
+        s = RX_BEARER.replace(s) { m -> m.groupValues[1] + "<BEARER>" }
+        s = RX_SIGN_COOKIE.replace(s) { m -> m.groupValues[1] + "<COOKIE>" }
+        s = RX_COOKIE.replace(s) { m -> m.groupValues[1] + "<COOKIE>" }
+        s = RX_CF.replace(s) { m -> m.groupValues[1] + "<CF>" }
+        return s
+    }
+
+    fun init(context: Context) {
+        synchronized(lock) {
+            try {
+                val f = File(context.filesDir, "bingelog.txt")
+                if (f.exists() && f.length() > MAX_FILE_BYTES) {
+                    // rotate: keep last half
+                    val lines = f.readLines().takeLast(MAX_LINES / 2)
+                    f.writeText(lines.joinToString("\n") + "\n")
+                }
+                // load existing into buffer
+                if (f.exists()) {
+                    f.readLines().takeLast(MAX_LINES).forEach { buffer.addLast(it) }
+                }
+                writer = BufferedWriter(FileWriter(f, true))
+            } catch (e: Exception) {
+                // logging failed — non-fatal, buffer still works
+            }
+        }
+    }
+
+    private fun writeLine(line: String, level: Char) {
         synchronized(lock) {
             buffer.addLast(line)
             while (buffer.size > MAX_LINES) buffer.removeFirst()
+            try {
+                writer?.appendLine(line)
+                writer?.flush()
+            } catch (_: Exception) {}
         }
-        Log.d(TAG, message)
+        when (level) {
+            'e' -> Log.e(TAG, line)
+            else -> Log.d(TAG, line)
+        }
+    }
+
+    fun d(message: String) {
+        writeLine("[${timeFormat.format(Date())}] $message", 'd')
     }
 
     fun e(message: String) {
-        val line = "[${timeFormat.format(Date())}] ✗ $message"
-        synchronized(lock) {
-            buffer.addLast(line)
-            while (buffer.size > MAX_LINES) buffer.removeFirst()
-        }
-        Log.e(TAG, message)
+        writeLine("[${timeFormat.format(Date())}] ✗ $message", 'e')
     }
 
     fun section(title: String) {
-        val line = "───── $title ─────"
-        synchronized(lock) {
-            buffer.addLast(line)
-            while (buffer.size > MAX_LINES) buffer.removeFirst()
-        }
-        Log.d(TAG, line)
+        writeLine("───── $title ─────", 'd')
     }
 
-    /** Returns the entire log, newest last. */
-    fun all(): String = synchronized(lock) {
-        if (buffer.isEmpty()) "(no logs yet)"
-        else buffer.joinToString("\n")
-    }
+    fun allSanitized(): String = sanitize(
+        synchronized(lock) {
+            if (buffer.isEmpty()) "(no logs yet)" else buffer.joinToString("\n")
+        }
+    )
 
     fun count(): Int = synchronized(lock) { buffer.size }
 
-    fun clear() = synchronized(lock) { buffer.clear() }
+    fun clear() = synchronized(lock) {
+        buffer.clear()
+        try {
+            writer?.close()
+            writer = null
+        } catch (_: Exception) {}
+        try {
+            BingeCloudCtx.context?.let { ctx ->
+                File(ctx.filesDir, "bingelog.txt").delete()
+                writer = BufferedWriter(FileWriter(File(ctx.filesDir, "bingelog.txt"), true))
+            }
+        } catch (_: Exception) {}
+    }
 }

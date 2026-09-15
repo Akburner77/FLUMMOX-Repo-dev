@@ -35,7 +35,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - uses: android-actions/setup-android@v3
+      
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -59,7 +59,7 @@ jobs:
 
       - name: Patch plugins.json URL and bump version
         env:
-          NEW_VERSION: 135
+          NEW_VERSION: 152
           OUTPUT_BRANCH: ${{ steps.out.outputs.branch }}
         run: python3 src/scripts/patch_plugins.py
 

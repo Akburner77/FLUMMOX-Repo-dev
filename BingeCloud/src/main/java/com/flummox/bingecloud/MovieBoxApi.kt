@@ -12,9 +12,6 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
-// ─────────────────────────────────────────
-//  Constants — verified from phisher98 build
-// ─────────────────────────────────────────
 private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
 private const val MB_SECRET_ALT_B64 = "XQn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
 private const val MB_VERSION_CODE = 50020126L
@@ -34,9 +31,6 @@ private val MB_HOSTS = listOf(
 private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
 private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
 
-// ─────────────────────────────────────────
-//  Device ID + client info
-// ─────────────────────────────────────────
 private val mbDeviceIdLock = Any()
 private var mbDeviceId: String? = null
 
@@ -55,9 +49,6 @@ private fun clientInfo(): String {
     return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"official","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
 }
 
-// ─────────────────────────────────────────
-//  Crypto
-// ─────────────────────────────────────────
 private fun md5Hex(data: ByteArray): String {
     val md = MessageDigest.getInstance("MD5")
     return md.digest(data).joinToString("") { "%02x".format(it) }
@@ -132,9 +123,6 @@ private fun generateXTrSignature(
     return "$ts|2|${b64Encode(sig)}"
 }
 
-// ─────────────────────────────────────────
-//  Header builder
-// ─────────────────────────────────────────
 private fun buildHeaders(
     method: String,
     url: String,
@@ -160,9 +148,6 @@ private fun buildHeaders(
     return map
 }
 
-// ─────────────────────────────────────────
-//  Session
-// ─────────────────────────────────────────
 private var mbSession: String? = null
 
 private suspend fun bootstrapToken(): String? {
@@ -173,7 +158,7 @@ private suspend fun bootstrapToken(): String? {
         BCLog.d("MB bootstrap ${res.code}")
         if (res.code !in 200..299) return null
         val xUser = res.headers["x-user"] ?: res.headers["X-User"] ?: return null
-        BCLog.d("MB x-user: ${xUser.take(200)}")
+        BCLog.d("MB x-user: ${xUser.take(120)}")
         val tok = JSONObject(xUser).optString("token").takeIf { it.isNotBlank() }
         if (tok != null) {
             BCLog.d("MB token len=${tok.length}")
@@ -192,10 +177,12 @@ private suspend fun ensureSession(): String? {
     return bootstrapToken()
 }
 
-// ─────────────────────────────────────────
-//  GET helper
-// ─────────────────────────────────────────
 private suspend fun mbGet(path: String, query: String? = null, retried: Boolean = false): JSONObject? {
+    val cacheKey = "mb:get:$path?${query ?: ""}"
+    BCCache.get(cacheKey)?.let {
+        return try { JSONObject(it) } catch (_: Exception) { null }
+    }
+
     val session = ensureSession() ?: run {
         BCLog.e("MB: no session for GET $path"); return null
     }
@@ -206,13 +193,14 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
             val res = app.get(fullUrl, headers = headers)
             BCLog.d("MB GET $host$path -> ${res.code}")
             if (res.code in 200..299) {
-                return try { JSONObject(res.text) } catch (e: Exception) {
+                val text = res.text
+                BCCache.put(cacheKey, text)
+                return try { JSONObject(text) } catch (e: Exception) {
                     BCLog.e("MB JSON parse: ${e.message}"); null
                 }
+                continue
             }
-            BCLog.d("MB body: ${res.text.take(300)}")
             if ((res.code == 401 || res.code == 403) && !retried) {
-                BCLog.d("MB: auth fail, re-bootstrap")
                 mbSession = null
                 return mbGet(path, query, true)
             }
@@ -223,64 +211,39 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
     return null
 }
 
-// ─────────────────────────────────────────
-//  Public API
-// ─────────────────────────────────────────
 data class MBSubject(val subjectId: String, val title: String, val year: Int?, val type: Int)
-data class MBStream(val url: String, val quality: String, val size: String?, val signCookie: String? = null)
+data class MBStream(
+    val url: String,
+    val quality: String,
+    val size: String?,
+    val signCookie: String? = null,
+    val audio: String? = null
+)
 
 suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
-    val session = ensureSession() ?: run {
-        BCLog.e("MB: no session for search"); return emptyList()
-    }
-    // Body format must match phisher's byte-for-byte — spaces matter for MD5
+    val cacheKey = "mb:search:$query:$page"
+    BCCache.get(cacheKey)?.let { return parseSearchResults(it) }
+
+    val session = ensureSession() ?: return emptyList()
     val jsonBody = "{\"page\": $page, \"perPage\": 20, \"keyword\": \"$query\", \"restrictKid\": 1}"
-    BCLog.d("MB search body: $jsonBody")
+    BCLog.d("MB search: $query (p$page)")
 
     for (host in MB_HOSTS) {
         try {
             val url = "https://$host/wefeed-mobile-bff/subject-api/search/v2"
-            val headers = buildHeaders(
-                method = "POST",
-                url = url,
-                contentType = "application/json; charset=utf-8",
-                accept = "application/json",
-                body = jsonBody,
-                bearer = session
-            )
-            val res = app.post(
-                url = url,
-                headers = headers,
-                requestBody = jsonBody.toRequestBody(JSON_MEDIA)
-            )
+            val headers = buildHeaders("POST", url, "application/json; charset=utf-8",
+                "application/json", jsonBody, session)
+            val res = app.post(url, headers = headers, requestBody = jsonBody.toRequestBody(JSON_MEDIA))
             BCLog.d("MB POST search $host -> ${res.code}")
             if (res.code !in 200..299) {
-                BCLog.d("MB body: ${res.text.take(300)}")
                 if (res.code == 401 || res.code == 403) {
                     mbSession = null
                     return mbSearch(query, page)
                 }
                 continue
             }
-            val json = JSONObject(res.text)
-            val results = json.optJSONObject("data")?.optJSONArray("results") ?: run {
-                BCLog.d("MB no results array: ${res.text.take(300)}")
-                return emptyList()
-            }
-            val out = mutableListOf<MBSubject>()
-            for (i in 0 until results.length()) {
-                val r = results.optJSONObject(i) ?: continue
-                val subs = r.optJSONArray("subjects") ?: continue
-                for (j in 0 until subs.length()) {
-                    val s = subs.optJSONObject(j) ?: continue
-                    val id = s.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
-                    val title = s.optString("title").takeIf { it.isNotBlank() } ?: continue
-                    val type = s.optInt("subjectType", 1)
-                    out.add(MBSubject(id, title, null, type))
-                }
-            }
-            BCLog.d("MB search: ${out.size} results")
-            return out
+            BCCache.put(cacheKey, res.text)
+            return parseSearchResults(res.text)
         } catch (e: Exception) {
             BCLog.e("MB search $host err: ${e.message}")
         }
@@ -288,14 +251,54 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     return emptyList()
 }
 
+private fun parseSearchResults(text: String): List<MBSubject> {
+    val json = try { JSONObject(text) } catch (_: Exception) { return emptyList() }
+    val results = json.optJSONObject("data")?.optJSONArray("results") ?: return emptyList()
+    val out = mutableListOf<MBSubject>()
+    for (i in 0 until results.length()) {
+        val r = results.optJSONObject(i) ?: continue
+        val subs = r.optJSONArray("subjects") ?: continue
+        for (j in 0 until subs.length()) {
+            val s = subs.optJSONObject(j) ?: continue
+            val id = s.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
+            val title = s.optString("title").takeIf { it.isNotBlank() } ?: continue
+            out.add(MBSubject(id, title, null, s.optInt("subjectType", 1)))
+        }
+    }
+    BCLog.d("MB search: ${out.size} results")
+    return out
+}
+
 suspend fun mbDetail(subjectId: String): JSONObject? =
     mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
-suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<MBStream> {
+suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
+    val detail = try { mbDetail(originalSubjectId) } catch (e: Exception) { null }
+    val dubs = detail?.optJSONObject("data")?.optJSONArray("dubs")
+
+    if (dubs == null || dubs.length() == 0) {
+        BCLog.d("MB langs: [Original] (no dubs array)")
+        return listOf(originalSubjectId to "Original")
+    }
+
+    var originalLabel: String? = null
+    val dubEntries = mutableListOf<Pair<String, String>>()
+    for (i in 0 until dubs.length()) {
+        val d = dubs.optJSONObject(i) ?: continue
+        val id = d.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
+        val lan = d.optString("lanName").takeIf { it.isNotBlank() } ?: continue
+        if (id == originalSubjectId) { originalLabel = lan; continue }
+        dubEntries.add(id to lan)
+    }
+    val out = mutableListOf<Pair<String, String>>()
+    out.add(originalSubjectId to (originalLabel ?: "Original"))
+    out.addAll(dubEntries)
+    BCLog.d("MB langs: ${out.map { it.second }}")
+    return out
+}
+suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
-    BCLog.d("MB play: $q")
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
-    BCLog.d("MB play resp: ${json.toString().take(400)}")
     val root = json.optJSONObject("data") ?: json
     val arr = root.optJSONArray("streams")
         ?: root.optJSONArray("videos")
@@ -310,10 +313,9 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<M
         val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
             if (it.toIntOrNull() != null) "${it}p" else it
         } ?: o.optString("quality").ifBlank { "Auto" }
-        val size = o.optString("size").ifBlank { null }
-        val signCookie = o.optString("signCookie").ifBlank { null }
-        out.add(MBStream(url, quality, size, signCookie))
+        out.add(MBStream(url, quality, o.optString("size").ifBlank { null },
+            o.optString("signCookie").ifBlank { null }, audioLabel))
     }
-    BCLog.d("MB play: ${out.size} streams")
+    BCLog.d("MB play [$audioLabel]: ${out.size} streams")
     return out
 }
