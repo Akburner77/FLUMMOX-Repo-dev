@@ -193,7 +193,9 @@ open class BingeCloudProvider : MainAPI() {
         BCLog.section("loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
 
         val cached = BCCache.getMirrors(query.cacheKey())
-        val mirrors = cached ?: scrapeAllSources(query)
+        val mirrors = cached ?: com.flummox.bingecore.SpeedBooster.dedupedScrape(
+            "mirrors:${query.cacheKey()}"
+        ) { scrapeAllSources(query) }
         if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
         if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
