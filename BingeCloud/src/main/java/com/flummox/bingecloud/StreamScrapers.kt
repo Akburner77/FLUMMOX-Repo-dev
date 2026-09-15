@@ -29,9 +29,23 @@ data class ScrapedMirror(
     val headers: Map<String, String>? = null
 )
 
+// ── 24h-cached GitHub domain resolver ──
+private const val DOMAIN_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json"
+private const val DOMAIN_CACHE_TTL = 24 * 60 * 60 * 1000L
+private val domainLock = Any()
+
 private suspend fun resolveDomain(key: String, fallback: String): String {
+    val cached = BCCache.get(DOMAIN_JSON_URL, DOMAIN_CACHE_TTL)
+    if (cached != null) {
+        return try {
+            val live = JSONObject(cached).optString(key).trim()
+            if (live.startsWith("http")) live else fallback
+        } catch (_: Exception) { fallback }
+    }
+
     return try {
-        val json = app.get("https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json").text
+        val json = app.get(DOMAIN_JSON_URL).text
+        BCCache.put(DOMAIN_JSON_URL, json)
         val live = JSONObject(json).optString(key).trim()
         if (live.startsWith("http")) live else fallback
     } catch (e: Exception) {
