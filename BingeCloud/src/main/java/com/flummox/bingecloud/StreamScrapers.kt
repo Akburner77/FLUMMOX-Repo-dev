@@ -451,18 +451,23 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         if (Settings.isSrcHdh()) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
                 try {
-                    com.flummox.bingecore.SpeedBooster.deduped("hdh:${q.cacheKey()}") {
+                com.flummox.bingecore.SpeedBooster.deduped("hdh:${q.cacheKey()}") {
                         val page = hdhub4uFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
                         hdhub4uExtractRaw(page)
                     }
                 } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
             } ?: run { BCLog.d("HDH timeout"); emptyList() }
         })
-        if (Settings.isSrcMovieBox()) jobs.add(async {
+        if (Settings.isSrcGogo() && q.type.contains("anime", true)) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
-                try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
-            } ?: run { BCLog.d("MB timeout"); emptyList() }
+                try { gogoExtractRaw(q) } catch (e: Exception) { BCLog.e("Gogo task failed: ${e.message}"); emptyList() }
+           } ?: run { BCLog.d("Gogo timeout"); emptyList() }
         })
+       if (Settings.isSrcMovieBox()) jobs.add(async {
+           kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+               try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+           } ?: run { BCLog.d("MB timeout"); emptyList() }
+       })
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
         val all = jobs.awaitAll().filterNotNull().flatten()
@@ -470,7 +475,8 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         val md = all.count { it.source == "MD" }
         val hdh = all.count { it.source == "HDH" }
         val mb = all.count { it.source == "MB" }
-        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb total=${all.size}")
+        val gogo = all.count { it.source == "GOGO" }
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb GOGO=$gogo total=${all.size}")
         all
     }
 }
