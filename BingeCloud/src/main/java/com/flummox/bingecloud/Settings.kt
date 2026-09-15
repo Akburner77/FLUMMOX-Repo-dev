@@ -791,7 +791,7 @@ object Settings {
             body.addView(c.root)
         }
 
-        // ── Debug Logs ──
+        
         // ── Debug Logs ──
 run {
     val c = buildCard(
@@ -827,9 +827,9 @@ run {
             false
         }
     }
-    logScroll.addView(logView, ScrollView.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-    ))
+    logScroll.addView(logView, ViewGroup.LayoutParams(
+    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+))
 
     val btnRow = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
