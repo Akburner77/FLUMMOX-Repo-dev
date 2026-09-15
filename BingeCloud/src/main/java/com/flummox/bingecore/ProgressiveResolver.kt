@@ -1,6 +1,7 @@
 package com.flummox.bingecore
 
 import com.flummox.bingecloud.BCLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -12,22 +13,15 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.atomic.AtomicInteger
 
-// ── bingecore: progressive resolver ──
-// Feed it a list of items. It resolves them in parallel, emits each result the
-// moment it's ready, and returns control to the caller as soon as EITHER:
-//   • minBeforeReturn items have been emitted, OR
-//   • softCapMs elapsed, OR
-//   • all items finished
-// Remaining coroutines keep running on a shared background scope, so late
-// results still reach the picker if the CS3 build supports live updates.
+// ── bingecore: progressive resolver with ordered emission ──
+// Items resolve in parallel. Results are emitted in INPUT ORDER, not
+// completion order — so the caller's sorted list stays sorted in the picker.
 //
-// Usage:
-//   ProgressiveResolver.run(
-//     items = myItems,
-//     concurrency = 50,
-//     resolve = { item -> listOf(whateverYouWantEmitted) },
-//     onEmit = { result -> callback.invoke(result) }
-//   )
+// Returns as soon as EITHER:
+//   • minBeforeReturn items emitted, OR
+//   • softCapMs elapsed, OR
+//   • all items resolved
+// Remaining work continues on a shared background scope.
 object ProgressiveResolver {
 
     private val SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -42,22 +36,40 @@ object ProgressiveResolver {
         onEmit: (R) -> Unit,
         onFail: (T, Exception) -> Unit = { _, _ -> }
     ) {
+        if (items.isEmpty()) return
+
         val emitted = AtomicInteger(0)
         val startMs = System.currentTimeMillis()
         val sem = Semaphore(concurrency.coerceIn(1, 50))
 
+        // ordered emission state
+        val buckets = arrayOfNulls<MutableList<R>>(items.size)   // null = not done yet
+        val nextToEmit = intArrayOf(0)
+        val emitLock = Any()
+
         val job = SCOPE.launch {
-            items.map { item ->
+            items.mapIndexed { index, item ->
                 async {
                     sem.withPermit {
-                        try {
-                            val results = resolve(item)
-                            results.forEach { r ->
-                                onEmit(r)
-                                emitted.incrementAndGet()
-                            }
+                        val resolved: List<R> = try {
+                            resolve(item)
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             onFail(item, e)
+                            emptyList()
+                        }
+                        // ── store result, then flush any consecutive completed items in order ──
+                        synchronized(emitLock) {
+                            buckets[index] = resolved.toMutableList()
+                            while (nextToEmit[0] < items.size) {
+                                val bucket = buckets[nextToEmit[0]] ?: break
+                                bucket.forEach { r ->
+                                    onEmit(r)
+                                    emitted.incrementAndGet()
+                                }
+                                nextToEmit[0]++
+                            }
                         }
                     }
                 }
