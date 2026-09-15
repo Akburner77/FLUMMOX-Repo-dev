@@ -395,29 +395,33 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
 
         if (Settings.isSrcVm()) jobs.add(async {
     try {
-        com.flummox.bingecore.SpeedBooster.dedupedScrape("vm:${q.cacheKey()}") {
-            val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@dedupedScrape emptyList()
+        com.flummox.bingecore.SpeedBooster.deduped("vm:${q.cacheKey()}") {
+            val page = vegamoviesFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
             if (q.type == "series") vegamoviesExtractSeriesRaw(page, q.season, q.episode)
             else vegamoviesExtractMovieRaw(page)
         }
     } catch (e: Exception) { BCLog.e("VM task failed: ${e.message}"); emptyList() }
 })
-        if (Settings.isSrcMd()) jobs.add(async {
-            try {
-                val page = moviesdriveFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
-                if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
-                else moviesdriveExtractMovieRaw(page)
-            } catch (e: Exception) { BCLog.e("MD task failed: ${e.message}"); emptyList() }
-        })
-        if (Settings.isSrcHdh()) jobs.add(async {
-            try {
-                val page = hdhub4uFindPage(q.title, q.year, q.type, q.season) ?: return@async emptyList()
-                hdhub4uExtractRaw(page)
-            } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
-        })
-        if (Settings.isSrcMovieBox()) jobs.add(async {
-            try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
-        })
+if (Settings.isSrcMd()) jobs.add(async {
+    try {
+        com.flummox.bingecore.SpeedBooster.deduped("md:${q.cacheKey()}") {
+            val page = moviesdriveFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
+            if (q.type == "series") moviesdriveExtractSeriesRaw(page, q.season, q.episode)
+            else moviesdriveExtractMovieRaw(page)
+        }
+    } catch (e: Exception) { BCLog.e("MD task failed: ${e.message}"); emptyList() }
+})
+if (Settings.isSrcHdh()) jobs.add(async {
+    try {
+        com.flummox.bingecore.SpeedBooster.deduped("hdh:${q.cacheKey()}") {
+            val page = hdhub4uFindPage(q.title, q.year, q.type, q.season) ?: return@deduped emptyList()
+            hdhub4uExtractRaw(page)
+        }
+    } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
+})
+if (Settings.isSrcMovieBox()) jobs.add(async {
+    try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+})
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
         val all = jobs.awaitAll().flatten()
