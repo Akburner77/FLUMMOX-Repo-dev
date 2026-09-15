@@ -119,7 +119,7 @@ private fun linkTypeFor(url: String): ExtractorLinkType {
 
 // ── dead hosts: don't waste time on them ──
 private val DEAD_HOSTS = setOf(
-    "gdflix.dev"   // 429 rate-limited, WebView can't solve it
+    "gdflix.dev"
 )
 
 // ══════════════════════════════════════════════════════════════
@@ -166,9 +166,9 @@ open class VCloud(
             return
         }
 
-        // ── extraction cache ──
+        // ── extraction cache: 6 hours ──
         val cacheKey = "vcloud:${sourceTag}:${qualityLabel}:$url"
-        BCCache.get(cacheKey, 30 * 60 * 1000L)?.let { cached ->
+        BCCache.get(cacheKey, 6 * 60 * 60 * 1000L)?.let { cached ->
             BCLog.d("VCloud CACHE HIT: $sourceTag $qualityLabel (0ms)")
             callback.invoke(
                 newExtractorLink(
