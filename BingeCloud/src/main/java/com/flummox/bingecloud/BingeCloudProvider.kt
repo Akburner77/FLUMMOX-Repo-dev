@@ -255,7 +255,13 @@ open class BingeCloudProvider : MainAPI() {
                         hostSem(host).withPermit {
                             try {
                                 val emoji = if (smartSort) LinkScore.emoji(score) else ""
-                                if (m.source == "MB") {
+                                if (m.source == "GOGO") {
+                                val bag = mutableListOf<ExtractorLink>()
+                                    GogoCdn().getUrl(m.url, "", subtitleCallback) { bag.add(it) }
+                                if (bag.isEmpty()) HostHealth.recordFailure(host)
+                                else HostHealth.recordSuccess(host)
+                                bag
+                                } else if (m.source == "MB") {
                                     val linkType = when {
                                         m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
                                         m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
