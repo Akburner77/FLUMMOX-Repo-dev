@@ -16,8 +16,10 @@ object BCCache {
         e.body
     }
 
-    fun put(key: String, body: String) = synchronized(lock) {
-        map.put(key, Entry(System.currentTimeMillis(), body))
+    fun put(key: String, body: String) {
+        synchronized(lock) {
+            map.put(key, Entry(System.currentTimeMillis(), body))
+        }
     }
 
     fun clear() = synchronized(lock) { map.evictAll() }
