@@ -275,44 +275,28 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
 suspend fun mbDetail(subjectId: String): JSONObject? =
     mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
-suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0): List<MBStream> {
+suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
-    BCLog.d("MB play: $q")
+    BCLog.d("MB play: $q (audio=$audioLabel)")
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
-    // Full dump — 3000 chars covers ~6-8 stream entries
-    BCLog.d("MB play resp: ${json.toString().take(3000)}")
     val root = json.optJSONObject("data") ?: json
     val arr = root.optJSONArray("streams")
         ?: root.optJSONArray("videos")
         ?: root.optJSONArray("list")
         ?: return emptyList()
-    BCLog.d("MB play: array len=${arr.length()}")
     val out = mutableListOf<MBStream>()
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
-
         val resolutionsStr = o.optString("resolutions").ifBlank { null }
         val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
             if (it.toIntOrNull() != null) "${it}p" else it
         } ?: o.optString("quality").ifBlank { "Auto" }
-
         val size = o.optString("size").ifBlank { null }
         val signCookie = o.optString("signCookie").ifBlank { null }
-
-        // Try multiple likely field names for audio language
-        val audio = o.optString("audioLanguage")
-            .ifBlank { o.optString("audio_language") }
-            .ifBlank { o.optString("language") }
-            .ifBlank { o.optString("audio") }
-            .ifBlank { o.optString("classify") }
-            .ifBlank { o.optString("audioName") }
-            .ifBlank { o.optString("track") }
-            .ifBlank { null }
-
-        out.add(MBStream(url, quality, size, signCookie, audio))
+        out.add(MBStream(url, quality, size, signCookie, audioLabel))
     }
-    BCLog.d("MB play: ${out.size} streams (audio labels: ${out.map { it.audio }.distinct()})")
+    BCLog.d("MB play [$audioLabel]: ${out.size} streams")
     return out
 }
