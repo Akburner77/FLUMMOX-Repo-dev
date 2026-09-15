@@ -25,23 +25,8 @@ private const val PREFETCH_DEBOUNCE_MS = 800L
 
 private val PREFETCH_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 private var activePrefetchJob: Job? = null
-
-// ── user-tap detection: same URL loaded twice within 30s = real open ──
-private val recentLoads = ConcurrentHashMap<String, MutableList<Long>>()
-private const val LOAD_MEMORY_MS = 30_000L
-
-private fun registerLoadAndDetectTap(url: String): Boolean {
-    val now = System.currentTimeMillis()
-    val list = recentLoads.getOrPut(url) { mutableListOf() }
-    list.removeAll { now - it > LOAD_MEMORY_MS }
-    val isUserTap = list.isNotEmpty()
-    list.add(now)
-    if (recentLoads.size > 30) {
-        val oldest = recentLoads.minByOrNull { it.value.maxOrNull() ?: 0L }?.key
-        if (oldest != null) recentLoads.remove(oldest)
-    }
-    return isUserTap
-}
+private var lastHomeRenderMs: Long = 0L
+private const val HOME_GRACE_MS = 5000L
 
 fun StreamQuery.cacheKey(): String =
     "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
@@ -68,11 +53,12 @@ open class BingeCloudProvider : MainAPI() {
 
     // ── home ──
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val parts = request.data.split(ROW_TAG)
-        if (parts.size < 2) return null
-        val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-            .mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+    val parts = request.data.split(ROW_TAG)
+    if (parts.size < 2) return null
+    lastHomeRenderMs = System.currentTimeMillis()
+    val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+        .mapNotNull { it.toSearchResponse() }
+    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     // ── search ──
@@ -126,12 +112,13 @@ open class BingeCloudProvider : MainAPI() {
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
-        // ── prefetch: only on real user taps (same URL loaded twice) ──
-        val isUserTap = registerLoadAndDetectTap(url)
-        if (!isUserTap) {
-            BCLog.d("load() preview (no prefetch): ${name.take(40)}")
-        }
-        if (Settings.isPrefetchEnabled() && isUserTap) {
+        // ── prefetch: skip if triggered by home banner render ──
+            val sinceHome = System.currentTimeMillis() - lastHomeRenderMs
+            val fromHomeBanner = sinceHome in 0 until HOME_GRACE_MS
+            if (fromHomeBanner) {
+               BCLog.d("load() preview (no prefetch): ${name.take(40)} [${sinceHome}ms since home]")
+            }
+            if (Settings.isPrefetchEnabled() && !fromHomeBanner) {
             val prefetchQuery: StreamQuery? = when {
                 tvType == TvType.Movie && videos.isEmpty() ->
                     StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
