@@ -19,6 +19,7 @@
 package com.flummox.bingecloud
 
 import android.content.Context
+import android.os.Build
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
@@ -27,6 +28,11 @@ import com.lagradost.cloudstream3.plugins.Plugin
 class BingeCloudPlugin : Plugin() {
     override fun load(context: Context) {
         BingeCloudCtx.context = context
+
+        BCLog.section("BingeCloud boot")
+        BCLog.d("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+        BCLog.d("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+        BCLog.d("ABI: ${Build.SUPPORTED_ABIS.joinToString(",")}")
 
         registerMainAPI(BingeCloudProvider())
         registerExtractorAPI(VCloud())
