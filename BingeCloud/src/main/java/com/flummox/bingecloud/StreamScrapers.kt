@@ -67,7 +67,7 @@ private fun stripQualifiers(s: String): String =
         .replace(Regex("""\s+"""), " ")
         .trim()
 
-private fun titleMatches(a: String, b: String): Boolean {
+fun titleMatches(a: String, b: String): Boolean {
     val sa = stripQualifiers(a)
     val sb = stripQualifiers(b)
     if (sa.isEmpty() || sb.isEmpty()) return false
