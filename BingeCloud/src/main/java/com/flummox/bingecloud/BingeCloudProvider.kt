@@ -25,7 +25,7 @@ private const val PREFETCH_DEBOUNCE_MS = 800L
 private val PREFETCH_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 private var activePrefetchJob: Job? = null
 
-private fun StreamQuery.cacheKey(): String =
+fun StreamQuery.cacheKey(): String =
     "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
 open class BingeCloudProvider : MainAPI() {
