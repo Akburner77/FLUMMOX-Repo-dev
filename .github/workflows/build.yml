@@ -55,13 +55,16 @@ jobs:
 
       - name: Build plugins
         working-directory: src
+        run: gradle make --no-daemon --no-configuration-cache --no-build-cache
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        run: gradle make --no-configuration-cache --no-build-cache
+        
 
       - name: Generate plugins.json
         working-directory: src
-        run: gradle makePluginsJson
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: gradle makePluginsJson --no-daemon --no-configuration-cache --no-build-cache
 
       - name: Copy artifacts to builds
         run: |
