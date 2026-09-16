@@ -70,7 +70,7 @@ jobs:
 
       - name: Patch plugins.json URL and bump version
         env:
-          NEW_VERSION: 185
+          NEW_VERSION: 186
           OUTPUT_BRANCH: ${{ steps.out.outputs.branch }}
         run: python3 src/scripts/patch_plugins.py
 
