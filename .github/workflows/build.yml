@@ -35,21 +35,30 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+          cache-disabled: true
 
       - name: Clean old .cs3
         run: rm -f builds/*.cs3
+
+      - name: Verify secret is visible
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          if [ -z "$TMDB_API_KEY" ]; then
+            echo "SECRET IS EMPTY OR MISSING — fix repo secret"
+            exit 1
+          fi
+          echo "SECRET OK — length ${#TMDB_API_KEY}"
 
       - name: Build plugins
         working-directory: src
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: gradle make --no-configuration-cache --no-build-cache
-  
+
       - name: Generate plugins.json
         working-directory: src
         run: gradle makePluginsJson
@@ -61,7 +70,7 @@ jobs:
 
       - name: Patch plugins.json URL and bump version
         env:
-          NEW_VERSION: 183
+          NEW_VERSION: 185
           OUTPUT_BRANCH: ${{ steps.out.outputs.branch }}
         run: python3 src/scripts/patch_plugins.py
 
