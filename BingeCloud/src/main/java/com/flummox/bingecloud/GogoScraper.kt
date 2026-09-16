@@ -1,19 +1,29 @@
 package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.app
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
 
 // ═══════════════════════════════════════════
 // ── GogoAnime scraper ──
-// 1) ?s= WordPress-style search (with short-query fallback)
-// 2) slug probe for variants / dub / spellings
+// Primary: WP REST /wp-json/wp/v2/search?search=<romaji>
+// Aliases: AniList GraphQL (English → romaji/synonyms)
+// Fallback: slug probe
 // ═══════════════════════════════════════════
 
 private const val GOGO_DOMAIN = "https://gogoanime.by"
+private const val ANILIST_URL = "https://graphql.anilist.co"
+private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
 private data class GogoCandidate(val url: String, val title: String, val score: Int)
 
+// ═══════════════════════════════════════════
+// ── SCORING ──
+// ═══════════════════════════════════════════
 private fun gogoScore(query: String, candidate: String): Int {
     val q = query.lowercase().trim()
     val c = candidate.lowercase().trim()
@@ -37,41 +47,115 @@ private fun gogoScore(query: String, candidate: String): Int {
 }
 
 // ═══════════════════════════════════════════
-// ── SLUG PROBE ──
+// ── ANILIST: English → romaji/synonym aliases ──
+// ═══════════════════════════════════════════
+private suspend fun anilistAltTitles(query: String): List<String> {
+    val cacheKey = "anilist:$query"
+    BCCache.get(cacheKey, 24 * 60 * 60 * 1000L)?.let { cached ->
+        return cached.split("|").filter { it.isNotBlank() }
+    }
+
+    return try {
+        val body = """
+            {"query":"query(\$s:String){Media(search:\$s,type:ANIME){title{romaji english native} synonyms}}","variables":{"s":${JSONObject.quote(query)}}}
+        """.trimIndent()
+
+        val res = app.post(
+            ANILIST_URL,
+            requestBody = body.toRequestBody(JSON_MEDIA),
+            headers = mapOf(
+                "Content-Type" to "application/json",
+                "Accept" to "application/json"
+            )
+        )
+        if (res.code !in 200..299) {
+            BCLog.d("AniList ${res.code} for '$query'")
+            return emptyList()
+        }
+
+        val media = JSONObject(res.text)
+            .optJSONObject("data")?.optJSONObject("Media")
+        if (media == null) {
+            BCCache.put(cacheKey, "")
+            return emptyList()
+        }
+
+        val titles = linkedSetOf<String>()
+        media.optJSONObject("title")?.let { t ->
+            listOf("romaji", "english", "native").forEach { k ->
+                t.optString(k).takeIf { it.isNotBlank() }?.let { titles.add(it) }
+            }
+        }
+        media.optJSONArray("synonyms")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                arr.optString(i).takeIf { it.isNotBlank() }?.let { titles.add(it) }
+            }
+        }
+
+        val list = titles.toList()
+        BCCache.put(cacheKey, list.joinToString("|"))
+        BCLog.d("AniList '$query' → ${list.take(4)}")
+        list
+    } catch (e: Exception) {
+        BCLog.e("AniList failed for '$query': ${e.message}")
+        emptyList()
+    }
+}
+
+// ═══════════════════════════════════════════
+// ── WP REST SEARCH ──
+// ═══════════════════════════════════════════
+private suspend fun gogoRestSearch(q: String): List<Pair<String, String>> {
+    val cacheKey = "gogo:rest:$q"
+    BCCache.get(cacheKey, 60 * 60 * 1000L)?.let { cached ->
+        return cached.split("\n").mapNotNull { line ->
+            val parts = line.split("\t")
+            if (parts.size == 2) parts[0] to parts[1] else null
+        }
+    }
+
+    val url = "$GOGO_DOMAIN/wp-json/wp/v2/search?search=${URLEncoder.encode(q, "UTF-8")}&per_page=20&subtype=series"
+    return try {
+        val res = app.get(url)
+        if (res.code !in 200..299) {
+            BCLog.d("Gogo REST '$q' code=${res.code}")
+            return emptyList()
+        }
+        val arr = JSONArray(res.text)
+        val out = mutableListOf<Pair<String, String>>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("subtype") != "series") continue
+            val title = o.optString("title").takeIf { it.isNotBlank() } ?: continue
+            val link = o.optString("url").takeIf { it.isNotBlank() } ?: continue
+            out.add(title to link)
+        }
+        BCCache.put(cacheKey, out.joinToString("\n") { "${it.first}\t${it.second}" })
+        BCLog.d("Gogo REST '$q': ${out.size} series")
+        out
+    } catch (e: Exception) {
+        BCLog.e("Gogo REST '$q' failed: ${e.message}")
+        emptyList()
+    }
+}
+
+// ═══════════════════════════════════════════
+// ── SLUG PROBE (fallback) ──
 // ═══════════════════════════════════════════
 private fun slugify(t: String): String =
     t.lowercase().replace(Regex("""[^a-z0-9]+"""), "-").trim('-')
 
-private fun slugifyNoApos(t: String): String =
-    t.lowercase().replace("'", "").replace(Regex("""[^a-z0-9]+"""), "-").trim('-')
-
 private fun gogoSlugVariants(title: String): List<String> {
     val base = slugify(title)
-    val noApos = slugifyNoApos(title)
-    if (base.isBlank() && noApos.isBlank()) return emptyList()
+    if (base.isBlank()) return emptyList()
     val out = linkedSetOf<String>()
     out.add(base)
-    if (noApos != base) out.add(noApos)
-
-    // shippuden ↔ shippuuden
     out.add(base.replace("shippuden", "shippuuden"))
-    out.add(base.replace("shippuuden", "shippuden"))
-
-    // strip trailing "-season-N"
     val noSeason = base.replace(Regex("""-season-?\d+$"""), "").trim('-')
     if (noSeason.isNotBlank() && noSeason != base) out.add(noSeason)
-
-    // strip "the-" prefix
-    if (base.startsWith("the-")) out.add(base.removePrefix("the-"))
-
-    // dub variants last
-    out.add("$base-dub")
-    out.add("$base-english-dub")
-
-    return out.filter { it.isNotBlank() }.toList()
+    return out.filter { it.isNotBlank() }.take(3).toList()
 }
 
-/** Returns candidate ONLY if page exists AND has episodes AND real title. */
 private suspend fun gogoProbeSeries(slug: String): GogoCandidate? {
     val url = "$GOGO_DOMAIN/series/$slug/"
     return try {
@@ -80,114 +164,20 @@ private suspend fun gogoProbeSeries(slug: String): GogoCandidate? {
         val html = res.text
         if (html.length < 5000) return null
         val doc = Jsoup.parse(html, url)
-
-        // hard reject: must have episodes
-        val episodeItems = doc.select(".episodes-container .episode-item")
-        val looseItems = if (episodeItems.isEmpty()) doc.select(".episode-item") else episodeItems
-        if (looseItems.isEmpty()) return null
-
-        val titleEl = doc.selectFirst("h1.entry-title, .entry-title, h1")
-        val titleText = titleEl?.text()?.trim().orEmpty()
+        val eps = doc.select(".episodes-container .episode-item")
+            .ifEmpty { doc.select(".episode-item") }
+        if (eps.isEmpty()) return null
+        val titleText = doc.selectFirst("h1.entry-title, .entry-title, h1")?.text()?.trim().orEmpty()
         if (titleText.isBlank()) return null
         if (titleText.startsWith("Gogoanime", ignoreCase = true)) return null
-        if (titleText.length < 2) return null
-
-        BCLog.d("Gogo slug HIT: $slug → '${titleText.take(60)}' (${looseItems.size} eps)")
         GogoCandidate(url, titleText, 40)
-    } catch (e: Exception) {
-        BCLog.d("Gogo slug '$slug' threw: ${e.message}")
-        null
-    }
+    } catch (_: Exception) { null }
 }
 
-private suspend fun gogoSlugSearch(query: String, maxTries: Int = 6): List<GogoCandidate> {
-    val variants = gogoSlugVariants(query).take(maxTries)
-    val out = mutableListOf<GogoCandidate>()
+private suspend fun gogoSlugFallback(query: String): List<GogoCandidate> {
+    val variants = gogoSlugVariants(query)
     for (slug in variants) {
-        gogoProbeSeries(slug)?.let { out.add(it) }
-        if (out.size >= 3) break
-    }
-    return out
-}
-
-// ═══════════════════════════════════════════
-// ── DIAGNOSTIC ──
-// ═══════════════════════════════════════════
-private fun logSearchMiss(q: String, code: Int, html: String, doc: org.jsoup.nodes.Document) {
-    val aBs = doc.select("article.bs").size
-    val bsx = doc.select("article.bs .bsx").size
-    val bsxAny = doc.select(".bsx").size
-    val seriesLinks = doc.select("a[href*='/series/']").size
-    val lower = html.lowercase()
-    val cf = listOf(
-        "just a moment", "cf-chl", "cf_chl_opt",
-        "enable javascript and cookies", "attention required! | cloudflare",
-        "challenges.cloudflare.com"
-    ).any { lower.contains(it) }
-    BCLog.d("Gogo '$q' MISS | code=$code len=${html.length} cf=$cf")
-    BCLog.d("Gogo '$q' sel | article.bs=$aBs bsx=$bsx bsxAny=$bsxAny /series/=$seriesLinks")
-}
-
-// ═══════════════════════════════════════════
-// ── HTML SEARCH ──
-// ═══════════════════════════════════════════
-private fun queryVariants(query: String): List<String> {
-    val base = query.trim()
-    val stripped = base.replace(Regex("""[:!?.,;']"""), "")
-    val words = base.split(Regex("\\s+")).filter { it.isNotBlank() }
-    val out = linkedSetOf<String>()
-    out.add(base)
-    if (stripped != base) out.add(stripped)
-    if (words.size > 3) out.add(words.take(3).joinToString(" "))
-    if (words.size > 2) out.add(words.take(2).joinToString(" "))
-    if (words.size > 1) out.add(words.first())
-    return out.toList()
-}
-
-private fun parseSearchResults(doc: org.jsoup.nodes.Document, originalQuery: String): List<GogoCandidate> {
-    // primary selector
-    var cards = doc.select("article.bs .bsx > a[href]")
-    if (cards.isEmpty()) cards = doc.select("div.bs .bsx > a[href]")
-    if (cards.isEmpty()) cards = doc.select(".listupd .bsx > a[href]")
-    if (cards.isEmpty()) return emptyList()
-
-    val out = mutableListOf<GogoCandidate>()
-    for (a in cards) {
-        val href = a.attr("href")
-        if (href.isEmpty() || !href.contains("/series/")) continue
-        val title = a.attr("title").ifBlank {
-            a.selectFirst(".tt")?.text()?.trim() ?: ""
-        }.trim()
-        if (title.isEmpty()) continue
-        val score = gogoScore(originalQuery, title)
-        if (score > 0) {
-            val full = if (href.startsWith("http")) href else "$GOGO_DOMAIN$href"
-            out.add(GogoCandidate(full, title, score))
-        }
-    }
-    return out
-}
-
-private suspend fun gogoHtmlSearch(query: String): List<GogoCandidate> {
-    val attempts = queryVariants(query)
-    for (q in attempts) {
-        val res = try {
-            app.get("$GOGO_DOMAIN/?s=${URLEncoder.encode(q, "UTF-8")}")
-        } catch (e: Exception) {
-            BCLog.e("Gogo search '$q' threw: ${e.message}")
-            continue
-        }
-        val html = res.text
-        val doc = Jsoup.parse(html, "$GOGO_DOMAIN/")
-        val hits = parseSearchResults(doc, query)
-        if (hits.isEmpty()) {
-            logSearchMiss(q, res.code, html, doc)
-            continue
-        }
-        BCLog.d("Gogo search '$q': ${hits.size} hits (code=${res.code})")
-        val sorted = hits.sortedByDescending { it.score }
-        BCLog.d("Gogo search '$q' top: ${sorted.take(3).map { "${it.score}:${it.title}" }}")
-        return sorted.take(6)
+        gogoProbeSeries(slug)?.let { return listOf(it) }
     }
     return emptyList()
 }
@@ -196,20 +186,48 @@ private suspend fun gogoHtmlSearch(query: String): List<GogoCandidate> {
 // ── COMBINED SEARCH ──
 // ═══════════════════════════════════════════
 private suspend fun gogoSearchCandidates(query: String): List<GogoCandidate> {
-    val fromSearch = gogoHtmlSearch(query)
-    val fromSlug = gogoSlugSearch(query).filter { s -> fromSearch.none { it.url == s.url } }
+    // 1. Get aliases: original + AniList romaji/english/synonyms
+    val aliases = (listOf(query) + anilistAltTitles(query))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
 
-    val merged = (fromSearch + fromSlug)
-        .groupBy { it.url }
-        .map { (_, list) -> list.maxByOrNull { it.score }!! }
+    // 2. WP REST search for each alias
+    val all = mutableListOf<GogoCandidate>()
+    for (alias in aliases) {
+        val hits = gogoRestSearch(alias)
+        if (hits.isEmpty()) continue
+        for ((title, link) in hits) {
+            // score against ALL aliases; take best match across aliases
+            val best = aliases.maxOf { a -> gogoScore(a, title) }
+            if (best > 0) all.add(GogoCandidate(link, title, best))
+        }
+    }
+
+    // 3. Dedupe by URL, keep max score, sort
+    val merged = all.groupBy { it.url }
+        .map { (_, l) -> l.maxByOrNull { it.score }!! }
         .sortedByDescending { it.score }
+        .take(8)
 
-    BCLog.d("Gogo merged: ${merged.size} candidates (search=${fromSearch.size} slug=${fromSlug.size})")
-    return merged.take(8)
+    if (merged.isNotEmpty()) {
+        BCLog.d("Gogo merged: ${merged.size} (aliases=${aliases.size}) top: ${merged.take(3).map { "${it.score}:${it.title}" }}")
+        return merged
+    }
+
+    // 4. Fallback: slug probe on original query
+    val fromSlug = gogoSlugFallback(query)
+    if (fromSlug.isNotEmpty()) {
+        BCLog.d("Gogo slug fallback: ${fromSlug.size}")
+        return fromSlug
+    }
+
+    BCLog.d("Gogo: no candidates (aliases tried: $aliases)")
+    return emptyList()
 }
 
 // ═══════════════════════════════════════════
-// ── EPISODES + EXTRACT ──
+// ── EPISODES ──
 // ═══════════════════════════════════════════
 private suspend fun gogoEpisodes(seriesUrl: String): List<Triple<Int, String, String>> {
     return try {
@@ -229,6 +247,9 @@ private suspend fun gogoEpisodes(seriesUrl: String): List<Triple<Int, String, St
     }
 }
 
+// ═══════════════════════════════════════════
+// ── ENTRY ──
+// ═══════════════════════════════════════════
 suspend fun gogoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val candidates = gogoSearchCandidates(q.title)
     if (candidates.isEmpty()) { BCLog.d("Gogo: no candidates"); return emptyList() }
