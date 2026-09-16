@@ -9,7 +9,7 @@ android {
     compileSdk = 35
     defaultConfig {
         minSdk = 21
-        val tmdbKey = System.getenv("TMDB_API_KEY") ?: ""
+        val tmdbKey = (System.getenv("TMDB_API_KEY") ?: "").trim()
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbKey\"")
     }
     buildFeatures {
