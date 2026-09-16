@@ -56,18 +56,22 @@ private suspend fun anilistAltTitles(query: String): List<String> {
     }
 
     return try {
-        val body = """
-            {"query":"query(\$s:String){Media(search:\$s,type:ANIME){title{romaji english native} synonyms}}","variables":{"s":${JSONObject.quote(query)}}}
-        """.trimIndent()
+    val gqlQuery = "query(" + '$' + "s: String){" +
+        "Media(search: " + '$' + "s, type: ANIME){" +
+        "title{romaji english native} synonyms}}"
+    val bodyJson = JSONObject().apply {
+        put("query", gqlQuery)
+        put("variables", JSONObject().apply { put("s", query) })
+    }.toString()
 
-        val res = app.post(
-            ANILIST_URL,
-            requestBody = body.toRequestBody(JSON_MEDIA),
-            headers = mapOf(
-                "Content-Type" to "application/json",
-                "Accept" to "application/json"
-            )
+    val res = app.post(
+        ANILIST_URL,
+        requestBody = bodyJson.toRequestBody(JSON_MEDIA),
+        headers = mapOf(
+            "Content-Type" to "application/json",
+            "Accept" to "application/json"
         )
+    )
         if (res.code !in 200..299) {
             BCLog.d("AniList ${res.code} for '$query'")
             return emptyList()
