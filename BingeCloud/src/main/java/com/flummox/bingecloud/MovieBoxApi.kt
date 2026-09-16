@@ -258,7 +258,8 @@ data class MBStream(
     val quality: String,
     val size: String?,
     val signCookie: String? = null,
-    val audio: String? = null
+    val audio: String? = null,
+    val durationSec: Long = 0L
 )
 
 // ══════════════════════════════════════════════════════════════
@@ -355,8 +356,8 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         ?: root.optJSONArray("videos")
         ?: root.optJSONArray("list")
         ?: return emptyList()
-    val out = mutableListOf<MBStream>()
-    for (i in 0 until arr.length()) {
+        val out = mutableListOf<MBStream>()
+        for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
@@ -364,8 +365,18 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
             if (it.toIntOrNull() != null) "${it}p" else it
         } ?: o.optString("quality").ifBlank { "Auto" }
+
+        // ── duration (try common MB field names) ──
+        var dur = o.optLong("duration", 0L)
+        if (dur <= 0) dur = o.optLong("durationSeconds", 0L)
+        if (dur <= 0) dur = o.optLong("length", 0L)
+        if (dur <= 0) dur = o.optLong("durationMs", 0L).let { if (it > 0) it / 1000 else 0 }
+
+        // ── one-time raw key dump per language so we can verify field names ──
+        BCLog.d("MB raw [$audioLabel] keys=${o.keys().asSequence().toList()} dur=${dur}s")
+
         out.add(MBStream(url, quality, o.optString("size").ifBlank { null },
-            o.optString("signCookie").ifBlank { null }, audioLabel))
+            o.optString("signCookie").ifBlank { null }, audioLabel, dur))
     }
     BCLog.d("MB play [$audioLabel]: ${out.size} streams")
     return out
