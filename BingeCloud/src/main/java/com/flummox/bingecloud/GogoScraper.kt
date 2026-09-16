@@ -10,7 +10,7 @@ import java.net.URLEncoder
 
 // ═══════════════════════════════════════════
 // ── GogoAnime scraper ──
-// Primary: WP REST /wp-json/wp/v2/search?search=<romaji>
+// Primary: WP REST /wp-json/wp/v2/search?search=<alias>
 // Aliases: AniList GraphQL (English → romaji/synonyms)
 // Fallback: slug probe
 // ═══════════════════════════════════════════
@@ -56,22 +56,22 @@ private suspend fun anilistAltTitles(query: String): List<String> {
     }
 
     return try {
-    val gqlQuery = "query(" + '$' + "s: String){" +
-        "Media(search: " + '$' + "s, type: ANIME){" +
-        "title{romaji english native} synonyms}}"
-    val bodyJson = JSONObject().apply {
-        put("query", gqlQuery)
-        put("variables", JSONObject().apply { put("s", query) })
-    }.toString()
+        val gqlQuery = "query(" + '$' + "s: String){" +
+            "Media(search: " + '$' + "s, type: ANIME){" +
+            "title{romaji english native} synonyms}}"
+        val bodyJson = JSONObject().apply {
+            put("query", gqlQuery)
+            put("variables", JSONObject().apply { put("s", query) })
+        }.toString()
 
-    val res = app.post(
-        ANILIST_URL,
-        requestBody = bodyJson.toRequestBody(JSON_MEDIA),
-        headers = mapOf(
-            "Content-Type" to "application/json",
-            "Accept" to "application/json"
+        val res = app.post(
+            ANILIST_URL,
+            requestBody = bodyJson.toRequestBody(JSON_MEDIA),
+            headers = mapOf(
+                "Content-Type" to "application/json",
+                "Accept" to "application/json"
+            )
         )
-    )
         if (res.code !in 200..299) {
             BCLog.d("AniList ${res.code} for '$query'")
             return emptyList()
@@ -118,7 +118,7 @@ private suspend fun gogoRestSearch(q: String): List<Pair<String, String>> {
         }
     }
 
-    val url = "$GOGO_DOMAIN/wp-json/wp/v2/search?search=${URLEncoder.encode(q, "UTF-8")}&per_page=20&subtype=series"
+    val url = "$GOGO_DOMAIN/wp-json/wp/v2/search?search=${URLEncoder.encode(q, "UTF-8")}&per_page=20"
     return try {
         val res = app.get(url)
         if (res.code !in 200..299) {
@@ -187,46 +187,58 @@ private suspend fun gogoSlugFallback(query: String): List<GogoCandidate> {
 }
 
 // ═══════════════════════════════════════════
+// ── SCRIPT FILTER ──
+// ═══════════════════════════════════════════
+private fun hasUnsupportedScript(s: String): Boolean = s.any { c ->
+    c.code in 0x0590..0x05FF ||   // Hebrew
+    c.code in 0x0600..0x06FF ||   // Arabic
+    c.code in 0x0400..0x04FF ||   // Cyrillic
+    c.code in 0x0E00..0x0E7F ||   // Thai
+    c.code in 0x0900..0x097F ||   // Devanagari
+    c.code in 0xAC00..0xD7AF      // Hangul
+}
+
+// ═══════════════════════════════════════════
 // ── COMBINED SEARCH ──
 // ═══════════════════════════════════════════
 private suspend fun gogoSearchCandidates(query: String): List<GogoCandidate> {
-    // 1. Get aliases: original + AniList romaji/english/synonyms
-    val aliases = (listOf(query) + anilistAltTitles(query))
+    val rawAliases = anilistAltTitles(query)
+    val aliases = (listOf(query) + rawAliases)
         .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinct()
+        .filter { it.isNotBlank() && !hasUnsupportedScript(it) }
+        .distinctBy { it.lowercase() }
+        .take(4)
 
-    // 2. WP REST search for each alias
+    BCLog.d("Gogo aliases (${aliases.size}): $aliases")
+
     val all = mutableListOf<GogoCandidate>()
     for (alias in aliases) {
         val hits = gogoRestSearch(alias)
         if (hits.isEmpty()) continue
         for ((title, link) in hits) {
-            // score against ALL aliases; take best match across aliases
             val best = aliases.maxOf { a -> gogoScore(a, title) }
             if (best > 0) all.add(GogoCandidate(link, title, best))
         }
+        if (all.any { it.score >= 100 }) break
     }
 
-    // 3. Dedupe by URL, keep max score, sort
     val merged = all.groupBy { it.url }
         .map { (_, l) -> l.maxByOrNull { it.score }!! }
         .sortedByDescending { it.score }
         .take(8)
 
     if (merged.isNotEmpty()) {
-        BCLog.d("Gogo merged: ${merged.size} (aliases=${aliases.size}) top: ${merged.take(3).map { "${it.score}:${it.title}" }}")
+        BCLog.d("Gogo merged: ${merged.size} top: ${merged.take(3).map { "${it.score}:${it.title}" }}")
         return merged
     }
 
-    // 4. Fallback: slug probe on original query
     val fromSlug = gogoSlugFallback(query)
     if (fromSlug.isNotEmpty()) {
         BCLog.d("Gogo slug fallback: ${fromSlug.size}")
         return fromSlug
     }
 
-    BCLog.d("Gogo: no candidates (aliases tried: $aliases)")
+    BCLog.d("Gogo: no candidates")
     return emptyList()
 }
 
