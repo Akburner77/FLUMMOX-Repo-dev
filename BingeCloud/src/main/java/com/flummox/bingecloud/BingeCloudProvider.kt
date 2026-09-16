@@ -116,6 +116,31 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
             this.year = yearInt
         }
     }
+    private fun TmdbSearchItem.toSearchResponse(): SearchResponse? {
+    val id = this.id ?: return null
+    val mt = this.media_type ?: return null
+    if (mt != "movie" && mt != "tv") return null
+
+    val title = this.title ?: this.name ?: return null
+    val isAnime = mt == "tv"
+        && original_language == "ja"
+        && (genre_ids?.contains(16) == true)   // 16 = Animation
+
+    val tvType = when {
+        mt == "movie" -> TvType.Movie
+        isAnime -> TvType.Anime
+        else -> TvType.TvSeries
+    }
+
+    val loadType = if (mt == "movie") "movie" else "series"
+    val metaId = "tmdb:$id"
+    val year = (release_date ?: first_air_date)?.take(4)?.toIntOrNull()
+
+    return newMovieSearchResponse(title, "/$loadType$SEP$metaId", tvType) {
+        this.posterUrl = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" }
+        this.year = year
+    }
+    }
 
     // ── load ──
     override suspend fun load(url: String): LoadResponse? {
@@ -436,31 +461,3 @@ private data class TmdbSearchItem(
     val original_language: String? = null,
     val genre_ids: List<Int>? = null
 )
-
-private fun TmdbSearchItem.toSearchResponse(): SearchResponse? {
-    val id = this.id ?: return null
-    val mt = this.media_type ?: return null
-    if (mt != "movie" && mt != "tv") return null
-
-    val title = this.title ?: this.name ?: return null
-    val isAnime = mt == "tv"
-        && original_language == "ja"
-        && (genre_ids?.contains(16) == true)   // 16 = Animation
-
-    val tvType = when {
-        mt == "movie" -> TvType.Movie
-        isAnime -> TvType.Anime
-        else -> TvType.TvSeries
-    }
-
-    // Aiometa meta endpoint accepts movie/series only (Stremio standard).
-    // Anime is served as series; TvType above is a display hint.
-    val loadType = if (mt == "movie") "movie" else "series"
-    val metaId = "tmdb:$id"
-    val year = (release_date ?: first_air_date)?.take(4)?.toIntOrNull()
-
-    return newMovieSearchResponse(title, "/$loadType$SEP$metaId", tvType) {
-        this.posterUrl = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" }
-        this.year = year
-    }
-}
