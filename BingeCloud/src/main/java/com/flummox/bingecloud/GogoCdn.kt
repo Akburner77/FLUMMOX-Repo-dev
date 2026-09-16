@@ -21,11 +21,21 @@ class GogoCdn : ExtractorApi() {
     private val GOOGLEVIDEO_REGEX = Regex("""https?://[^"'\s\\]+googlevideo\.com/videoplayback[^"'\s\\]*""")
 
     override suspend fun getUrl(
-        url: String,
-        referer: String?,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
+    url: String,
+    referer: String?,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+) {
+    getUrl(url, referer, subtitleCallback, callback, 0)
+}
+
+private suspend fun getUrl(
+    url: String,
+    referer: String?,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit,
+    depth: Int
+) {
         val startMs = System.currentTimeMillis()
 
         // ── cache ──
@@ -72,19 +82,30 @@ class GogoCdn : ExtractorApi() {
             return
         }
 
-        // ── nested iframe — recurse once ──
-        val iframe = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-            .find(html)?.groupValues?.getOrNull(1)
-        if (!iframe.isNullOrBlank() && iframe != url) {
-            val nested = when {
-                iframe.startsWith("//") -> "https:$iframe"
-                iframe.startsWith("/") -> "https://gogoanime.by$iframe"
-                else -> iframe
-            }
-            BCLog.d("GogoCdn recurse → ${nested.take(80)}")
-            getUrl(nested, url, subtitleCallback, callback)
-            return
+        // ── nested iframe — recurse up to 3 levels ──
+    if (depth < 3) {
+    val iframe = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        .find(html)?.groupValues?.getOrNull(1)
+    if (!iframe.isNullOrBlank() && iframe != url) {
+        val nested = when {
+            iframe.startsWith("//") -> "https:$iframe"
+            iframe.startsWith("/") -> "https://gogoanime.by$iframe"
+            else -> iframe
         }
+        BCLog.d("GogoCdn recurse ${depth + 1} → ${nested.take(80)}")
+        getUrl(nested, url, subtitleCallback, callback, depth + 1)
+        return
+    }
+    // some players embed via JS: "file": "https://..."
+    val jsFile = Regex("""["']file["']\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']""", RegexOption.IGNORE_CASE)
+        .find(html)?.groupValues?.getOrNull(1)
+    if (!jsFile.isNullOrBlank()) {
+        BCLog.d("GogoCdn JS file: ${jsFile.take(80)}")
+        BCCache.put(cacheKey, jsFile)
+        emit(jsFile, callback)
+        return
+    }
+}
 
         BCLog.e("GogoCdn: no m3u8/mp4/googlevideo found (${System.currentTimeMillis() - startMs}ms)")
     }
