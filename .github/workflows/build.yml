@@ -46,8 +46,10 @@ jobs:
 
       - name: Build plugins
         working-directory: src
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: gradle make
-
+  
       - name: Generate plugins.json
         working-directory: src
         run: gradle makePluginsJson
