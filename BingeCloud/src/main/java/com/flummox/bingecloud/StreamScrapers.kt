@@ -94,18 +94,15 @@ fun titleMatches(a: String, b: String): Boolean {
     val common = ta.intersect(tb)
     if (common.isEmpty()) return false
 
-    // ── short-title guard: one-word names must match exactly ──
     if (ta.size == 1 || tb.size == 1) {
         return common.size == minOf(ta.size, tb.size) && common.size == 1
     }
 
-    // ── normal: 60%+ overlap both directions ──
     val queryInCandidate = common.size.toFloat() / ta.size
     val candidateInQuery = common.size.toFloat() / tb.size
     return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
 }
 
-// ── season filter ──
 private fun extractSeasons(title: String): List<Int> =
     Regex("""(?i)\bseason\s*0*(\d+)\b""").findAll(title)
         .mapNotNull { it.groupValues[1].toIntOrNull() }.toList()
@@ -461,7 +458,7 @@ suspend fun resolveWrapper(url: String): String? {
 // ═══════════════════════════════════════════
 // ── Entry point ──
 // ═══════════════════════════════════════════
-private const val PER_SOURCE_TIMEOUT_MS = 8000L
+private const val PER_SOURCE_TIMEOUT_MS = 25000L
 
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     BCLog.section("scrapeAllSources: ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
