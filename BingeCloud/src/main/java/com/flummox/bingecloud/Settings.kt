@@ -64,6 +64,7 @@ object Settings {
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
     const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
     const val K_SRC_GOGO = "bingecloud_src_gogo"
+    const val K_SRC_ANIKOTO = "bingecloud_src_anikoto"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
     const val K_PREFETCH = "bingecloud_prefetch"
@@ -195,7 +196,7 @@ object Settings {
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
     fun isSrcGogo(): Boolean = getKey<Boolean>(K_SRC_GOGO) ?: true
-
+    fun isSrcAnikoto(): Boolean = getKey<Boolean>(K_SRC_ANIKOTO) ?: true
     // ══════════════════════════════════════════════════════════
     // ── COLORS ──
     // ══════════════════════════════════════════════════════════
@@ -800,16 +801,17 @@ object Settings {
 
         // ── SOURCES ──
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcGogo()).count { it }
+            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcGogo(), isSrcAnikoto()).count { it }
             val c = buildCard(
-                ctx, "📡", "Sources", "$on of 5 enabled",
-                badge = "$on/5"
+                ctx, "📡", "Sources", "$on of 6 enabled",
+                badge = "$on/6"
             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
             c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
             c.body.addView(toggleRow(ctx, "GogoAnime", "Anime only", isSrcGogo()) { setKey(K_SRC_GOGO, it) })
+            c.body.addView(toggleRow(ctx, "AniKoto", "Anime only — sub/dub", isSrcAnikoto()) { setKey(K_SRC_ANIKOTO, it) })
             body.addView(c.root)
         }
 
