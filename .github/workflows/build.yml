@@ -1,4 +1,5 @@
 name: Build & Publish
+
 on:
   push:
     branches: [ main, master, dev ]
@@ -58,39 +59,45 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          PKG="com.community.mbox.in"
+          PKG="com.enjoy.moviebox" # Corrected package name
           VNAME=""
           VCODE=""
-
           echo "── Method 1: fetch MovieBox version from metadata APIs ──"
 
-          # ── Source 1: Aptoide public API ──
-          echo "→ Aptoide..."
-          R1=$(curl -sL --max-time 20 "https://ws75.aptoide.com/api/7/app/get/package_name=$PKG")
-          echo "→ Aptoide resp: $(echo "$R1" | head -c 300)"
-          if echo "$R1" | grep -q '"versionName"'; then
-            VNAME=$(echo "$R1" | grep -oP '"versionName"\s*:\s*"\K[^"]+' | head -1)
+          # ── Source 1: APKPure API (Unofficial, may change) ──
+          echo "→ APKPure..."
+          R1=$(curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0" \
+            "https://api.pureapk.com/m/v3/cms/app_version?hl=en-US&package_name=$PKG")
+          echo "→ APKPure resp: $(echo "$R1" | head -c 300)"
+          if echo "$R1" | grep -q '"version"'; then
+            VNAME=$(echo "$R1" | grep -oP '"version"\s*:\s*"\K[^"]+' | head -1)
             VCODE=$(echo "$R1" | grep -oP '"versionCode"\s*:\s*"?\K[0-9]+' | head -1)
           fi
 
-          # ── Source 2: APKPure API ──
+          # ── Source 2: Aptoide API (Unofficial, may change) ──
           if [ -z "$VNAME" ]; then
-            echo "→ APKPure..."
-            R2=$(curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0" \
-              "https://api.pureapk.com/m/v3/cms/app_version?hl=en-US&package_name=$PKG")
-            echo "→ APKPure resp: $(echo "$R2" | head -c 300)"
-            if echo "$R2" | grep -q '"version"'; then
-              VNAME=$(echo "$R2" | grep -oP '"version"\s*:\s*"\K[^"]+' | head -1)
-              VCODE=$(echo "$R2" | grep -oP '"versionCode"\s*:\s*"?\K[0-9]+' | head -1)
+            echo "→ Aptoide..."
+            # The Aptoide API requires the numeric app ID, not the package name.
+            # This URL first gets the app page to extract the ID, then queries the API.
+            APTOIDE_APP_PAGE="https://en.aptoide.com/search?query=$PKG"
+            APP_ID=$(curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0" "$APTOIDE_APP_PAGE" | grep -oP '"app":{"id":\K[0-9]+' | head -1)
+            if [ -n "$APP_ID" ]; then
+              R2=$(curl -sL --max-time 20 "https://ws75.aptoide.com/api/7/getApp/app_id/$APP_ID")
+              echo "→ Aptoide resp: $(echo "$R2" | head -c 300)"
+              if echo "$R2" | grep -q '"versionName"'; then
+                VNAME=$(echo "$R2" | grep -oP '"versionName"\s*:\s*"\K[^"]+' | head -1)
+                VCODE=$(echo "$R2" | grep -oP '"versionCode"\s*:\s*"?\K[0-9]+' | head -1)
+              fi
             fi
           fi
 
-          # ── Source 3: APKMirror page scrape ──
+          # ── Source 3: APKMirror page scrape (fallback) ──
           if [ -z "$VNAME" ]; then
             echo "→ APKMirror..."
             R3=$(curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0 (Linux; Android 13)" \
               "https://www.apkmirror.com/apk/moviebox/moviebox/")
             echo "→ APKMirror resp: $(echo "$R3" | head -c 300)"
+            # This regex is more robust for the APKMirror page structure.
             VNAME=$(echo "$R3" | grep -oP 'Version:\s*[^<]*>\K[0-9][0-9.]*' | head -1)
           fi
 
