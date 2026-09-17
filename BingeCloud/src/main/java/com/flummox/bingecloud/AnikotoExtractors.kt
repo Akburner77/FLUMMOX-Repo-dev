@@ -6,7 +6,6 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONArray
 import org.json.JSONObject
@@ -184,31 +183,18 @@ suspend fun anikotoExtractMegaPlayUrl(
 
     val signedM3u8 = anikotoSignMegaPlayUrl(m3u8)
 
-    val generated = try {
-        M3u8Helper.generateM3u8(
-            name = "AniKoto",
-            url = signedM3u8,
-            referer = referer,
-            headers = playbackHeaders
-        )
-    } catch (e: Exception) {
-        BCLog.d("AniKoto M3u8Helper failed: ${e.message}"); emptyList()
-    }
+    val signedM3u8 = anikotoSignMegaPlayUrl(m3u8)
 
-    if (generated.isNotEmpty()) {
-        generated.forEach { callback(it) }
-    } else {
-        val link = newExtractorLink(
-            source = "AniKoto",
-            name = label,
-            url = signedM3u8,
-            type = ExtractorLinkType.M3U8
-        ) {
-            this.referer = referer ?: "$host/"
-            this.headers = playbackHeaders
-        }
-        callback(link)
-    }
+val link = newExtractorLink(
+    source = "AniKoto",
+    name = label,
+    url = signedM3u8,
+    type = ExtractorLinkType.M3U8
+) {
+    this.referer = referer ?: "$host/"
+    this.headers = playbackHeaders
+}
+callback(link)
 
     val tracks = root.optJSONArray("tracks")
     if (tracks != null) {
