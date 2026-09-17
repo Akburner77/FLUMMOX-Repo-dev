@@ -381,7 +381,7 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         val formatVal = o.optString("format")
         val sizeVal = o.optString("size")
         val codecVal = o.optString("codecName")
-        val urlHead = url.take(70)
+        val urlHead = url.take(400)
         BCLog.d("MB raw [$audioLabel] dur=${dur}s idType=$idTypeVal fmt=$formatVal codec=$codecVal size=$sizeVal url=$urlHead")
 
         out.add(MBStream(
