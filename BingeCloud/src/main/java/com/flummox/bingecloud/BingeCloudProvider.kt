@@ -33,6 +33,16 @@ private const val HOME_GRACE_MS = 5000L
 fun StreamQuery.cacheKey(): String =
     "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
+// ── home content filter: drop daily soaps / talk / reality ──
+private val HOME_BLOCKED_GENRES = setOf(
+    "soap", "talk", "talk show", "reality", "reality tv", "news", "game show"
+)
+
+private fun AioMeta.isJunk(): Boolean {
+    val g = genres ?: return false
+    return g.any { it.lowercase().trim() in HOME_BLOCKED_GENRES }
+}
+
 open class BingeCloudProvider : MainAPI() {
     override var mainUrl = AIOMETA_BASE
     override var name = "BingeCloud"
@@ -59,7 +69,8 @@ open class BingeCloudProvider : MainAPI() {
         if (parts.size < 2) return null
         lastHomeRenderMs = System.currentTimeMillis()
         val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-            .mapNotNull { it.toSearchResponse() }
+        .filter { !it.isJunk() }
+        .mapNotNull { it.toSearchResponse() }
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
