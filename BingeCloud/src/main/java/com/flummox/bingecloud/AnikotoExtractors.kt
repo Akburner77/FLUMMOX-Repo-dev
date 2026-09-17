@@ -181,20 +181,18 @@ suspend fun anikotoExtractMegaPlayUrl(
 
     if (m3u8.isNullOrBlank()) { BCLog.d("AniKoto: no m3u8"); return }
 
-    val signedM3u8 = anikotoSignMegaPlayUrl(m3u8)
+    val signed = anikotoSignMegaPlayUrl(m3u8)
 
-    val signedM3u8 = anikotoSignMegaPlayUrl(m3u8)
-
-val link = newExtractorLink(
-    source = "AniKoto",
-    name = label,
-    url = signedM3u8,
-    type = ExtractorLinkType.M3U8
-) {
-    this.referer = referer ?: "$host/"
-    this.headers = playbackHeaders
-}
-callback(link)
+    val link = newExtractorLink(
+        source = "AniKoto",
+        name = label,
+        url = signed,
+        type = ExtractorLinkType.M3U8
+    ) {
+        this.referer = referer ?: "$host/"
+        this.headers = playbackHeaders
+    }
+    callback(link)
 
     val tracks = root.optJSONArray("tracks")
     if (tracks != null) {
