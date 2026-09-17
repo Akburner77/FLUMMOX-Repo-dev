@@ -13,11 +13,19 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
 private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
-private const val MB_SECRET_ALT_B64 = "XQn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
-private val MB_VERSION_CODE: Long = (BuildConfig.MB_VERSION_CODE.toLongOrNull() ?: 50020126L)
-private val MB_VERSION_NAME: String = BuildConfig.MB_VERSION_NAME.ifBlank { "4.0.02.0831.03" }
-private const val MB_PACKAGE = "com.community.mbox.in"
-private val MB_UA = "com.community.mbox.in/$MB_VERSION_CODE (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+private const val MB_SECRET_ALT_B64 = "Xqn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
+
+// ── live app values from com.community.oneroom (v4.0.02.0903.02, code 50020128) ──
+// BuildConfig values are populated by CI when the version-fetch step succeeds.
+// Fallback hardcoded values are used when CI fetch fails.
+private val MB_VERSION_CODE: Long =
+    (BuildConfig.MB_VERSION_CODE.toLongOrNull() ?: 50020128L)
+private val MB_VERSION_NAME: String =
+    BuildConfig.MB_VERSION_NAME.ifBlank { "4.0.02.0903.02" }
+private const val MB_PACKAGE = "com.community.oneroom"
+private const val MB_INSTALL_STORE = "ps"
+
+private val MB_UA = "$MB_PACKAGE/$MB_VERSION_CODE (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
 private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
 private val MB_HOSTS = listOf(
@@ -49,7 +57,7 @@ private fun deviceId(): String {
 }
 
 private fun clientInfo(): String {
-    return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"official","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
+    return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"$MB_INSTALL_STORE","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
 }
 
 // ══════════════════════════════════════════════════════════════
