@@ -18,6 +18,7 @@ import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
@@ -58,18 +59,66 @@ open class BingeCloudProvider : MainAPI() {
         lastHomeRenderMs = System.currentTimeMillis()
         val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
             .mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
-    }
-
+        return newHomePageResponse(request.name, items, hasNext = items.isNConcurrentHashMap
+                                   
     // ── search ──
-    override suspend fun search(query: String): List<SearchResponse>? {
-        val results = mutableListOf<SearchResponse>()
-        for (t in listOf("movie", "series", "anime")) {
-            try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
-            catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
-        }
-        return results
+override suspend fun search(query: String): List<SearchResponse>? {
+    val key = BuildConfig.TMDB_API_KEY
+    if (key.isBlank()) {
+        BCLog.e("TMDB key missing — falling back to Aiometa search")
+        return searchViaAiometa(query)
     }
+    return searchViaTmdb(query, key)
+}
+
+private suspend fun searchViaTmdb(query: String, key: String): List<SearchResponse>? {
+    val out = mutableListOf<SearchResponse>()
+    try {
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val url = "https://api.themoviedb.org/3/search/multi" +
+            "?api_key=$key&language=en-US&query=$encoded&page=1&include_adult=false"
+        val json = app.get(url).text
+        val parsed = tryParseJson<TmdbSearchResponse>(json)
+        parsed?.results?.forEach { item ->
+            item.toSearchResponse()?.let { out.add(it) }
+        }
+    } catch (e: Exception) {
+        BCLog.e("TMDB search failed: ${e.message}")
+    }
+    BCLog.d("TMDB search '$query': ${out.size} results")
+    return out
+}
+
+private suspend fun searchViaAiometa(query: String): List<SearchResponse>? {
+    val results = mutableListOf<SearchResponse>()
+    for (t in listOf("movie", "series", "anime")) {
+        try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
+        catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
+    }
+    return results
+}
+
+private fun TmdbSearchItem.toSearchResponse(): SearchResponse? {
+    val id = this.id ?: return null
+    val mt = this.media_type ?: return null
+    if (mt != "movie" && mt != "tv") return null
+    val title = this.title ?: this.name ?: return null
+    val isAnime = mt == "tv" &&
+        original_language == "ja" &&
+        (genre_ids?.contains(16) == true)
+    val tvType = when {
+        mt == "movie" -> TvType.Movie
+        isAnime -> TvType.Anime
+        else -> TvType.TvSeries
+    }
+    val loadType = if (mt == "movie") "movie" else "series"
+    val metaId = "tmdb:$id"
+    val year = (release_date ?: first_air_date)?.take(4)?.toIntOrNull()
+    return newMovieSearchResponse(title, "/$loadType$SEP$metaId", tvType) {
+        this.posterUrl = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" }
+        this.year = year
+    }
+}
 
     private fun AioMeta.toSearchResponse(): SearchResponse? {
         val metaId = this.id ?: return null
@@ -410,3 +459,16 @@ private fun decodeQuery(s: String): StreamQuery? = try {
         o.optInt("ns", 0), o.optInt("ne", 0)
     )
 } catch (e: Exception) { null }
+
+ private data class TmdbSearchResponse(val results: List<TmdbSearchItem>? = null)
+private data class TmdbSearchItem(
+    val id: Int? = null,
+    val media_type: String? = null,
+    val title: String? = null,
+    val name: String? = null,
+    val poster_path: String? = null,
+    val release_date: String? = null,
+    val first_air_date: String? = null,
+    val original_language: String? = null,
+    val genre_ids: List<Int>? = null
+)
