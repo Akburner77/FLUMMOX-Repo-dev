@@ -552,14 +552,7 @@ private suspend fun anikotoGetServerIds(series: AnikotoSeries, episode: Int): St
 private suspend fun anikotoResolvePlayerUrl(linkId: String, referer: String): String? {
     val encoded = android.net.Uri.encode(linkId)
     val endpoints = listOf(
-        "$ANIKOTO_DOMAIN/ajax/server/$encoded",
-        "$ANIKOTO_DOMAIN/ajax/server/$encoded/",
-        "$ANIKOTO_DOMAIN/ajax/server?id=$encoded",
-        "$ANIKOTO_DOMAIN/ajax/server?linkId=$encoded",
-        "$ANIKOTO_DOMAIN/ajax/links/$encoded",
-        "$ANIKOTO_DOMAIN/ajax/sources/$encoded",
-        "$ANIKOTO_DOMAIN/ajax/embed/$encoded",
-        "$ANIKOTO_DOMAIN/ajax/get-server?id=$encoded"
+    "$ANIKOTO_DOMAIN/ajax/server?get=$encoded"
     )
     for (ep in endpoints) {
         try {
