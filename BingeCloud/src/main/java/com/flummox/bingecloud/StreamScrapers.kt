@@ -9,6 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 
 // ═══════════════════════════════════════════
 // ── DATA MODELS ──
