@@ -414,7 +414,7 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
 
     allStreams
     .distinctBy { it.url }
-    .filter { it.durationSec <= 0L || it.durationSec >= 30L }   // drop MB placeholder ads (<30s)
+    .filter { it.durationSec == 0L || it.durationSec >= 30L }   // dur=0 passes (MB didn't send it); real ads <30s drop
     .map {
         ScrapedMirror(
             quality = it.quality.ifBlank { "Auto" },
