@@ -1,6 +1,8 @@
 package com.flummox.bingecloud
 
 import android.util.Base64
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.app
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -8,6 +10,7 @@ import org.json.JSONObject
 import java.net.URI
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
@@ -40,24 +43,58 @@ private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
 private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
 
 // ══════════════════════════════════════════════════════════════
-// ── DEVICE ID ──
+// ── DEVICE IDENTITY (persisted per-install) ──
 // ══════════════════════════════════════════════════════════════
-private val mbDeviceIdLock = Any()
-private var mbDeviceId: String? = null
+private const val MB_DEVICE_ID_KEY = "bingecloud_mb_device_id"
+private const val MB_GAID_KEY = "bingecloud_mb_gaid"
+
+private val mbIdentityLock = Any()
+private var mbDeviceIdCache: String? = null
+private var mbGaidCache: String? = null
+
+private fun randomHex16(): String {
+    val chars = "0123456789abcdef"
+    val sb = StringBuilder(16)
+    repeat(16) { sb.append(chars[Random.nextInt(chars.length)]) }
+    return sb.toString()
+}
 
 private fun deviceId(): String {
-    return mbDeviceId ?: synchronized(mbDeviceIdLock) {
-        mbDeviceId ?: run {
-            val chars = "0123456789abcdef"
-            val sb = StringBuilder(16)
-            repeat(16) { sb.append(chars[Random.nextInt(chars.length)]) }
-            sb.toString().also { mbDeviceId = it }
+    return mbDeviceIdCache ?: synchronized(mbIdentityLock) {
+        mbDeviceIdCache ?: run {
+            val stored = getKey<String>(MB_DEVICE_ID_KEY)
+            if (!stored.isNullOrBlank()) {
+                mbDeviceIdCache = stored
+                stored
+            } else {
+                val fresh = randomHex16()
+                setKey(MB_DEVICE_ID_KEY, fresh)
+                mbDeviceIdCache = fresh
+                fresh
+            }
+        }
+    }
+}
+
+private fun gaid(): String {
+    return mbGaidCache ?: synchronized(mbIdentityLock) {
+        mbGaidCache ?: run {
+            val stored = getKey<String>(MB_GAID_KEY)
+            if (!stored.isNullOrBlank()) {
+                mbGaidCache = stored
+                stored
+            } else {
+                val fresh = UUID.randomUUID().toString()
+                setKey(MB_GAID_KEY, fresh)
+                mbGaidCache = fresh
+                fresh
+            }
         }
     }
 }
 
 private fun clientInfo(): String {
-    return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"$MB_INSTALL_STORE","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
+    return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"$MB_INSTALL_STORE","gaid":"${gaid()}","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -381,7 +418,7 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         val formatVal = o.optString("format")
         val sizeVal = o.optString("size")
         val codecVal = o.optString("codecName")
-        val urlHead = url.take(400)
+        val urlHead = url.take(200)
         BCLog.d("MB raw [$audioLabel] dur=${dur}s idType=$idTypeVal fmt=$formatVal codec=$codecVal size=$sizeVal url=$urlHead")
 
         out.add(MBStream(
