@@ -521,36 +521,57 @@ private suspend fun anikotoFindSeries(title: String): AnikotoSeries? {
 }
 
 private suspend fun anikotoGetServerIds(seriesUrl: String, episode: Int): String? {
-    val doc = try {
-        app.get(seriesUrl, headers = anikotoBrowserHeaders).document
+    val html = try {
+        app.get(seriesUrl, headers = anikotoBrowserHeaders).text
     } catch (e: Exception) {
         BCLog.e("AniKoto series page failed: ${e.message}"); return null
     }
-    val animeId = doc.selectFirst("#watch-main")?.attr("data-id")?.takeIf { it.isNotBlank() }
-        ?: doc.selectFirst("[data-id]")?.attr("data-id")?.takeIf { it.isNotBlank() }
-        ?: Regex("""data-id=["'](\d+)["']""").find(doc.html())?.groupValues?.get(1)
-        ?: return null
-    val listJson = try {
-        anikotoResultString(app.get("$ANIKOTO_DOMAIN/ajax/episode/list/$animeId", headers = anikotoAjaxHeaders(seriesUrl)).text)
+    BCLog.d("AniKoto series page: len=${html.length}")
+
+    val doc = Jsoup.parse(html, seriesUrl)
+    val idFromWatch = doc.selectFirst("#watch-main")?.attr("data-id")
+    val idFromAny = doc.selectFirst("[data-id]")?.attr("data-id")
+    val idFromRegex = Regex("""data-id=["'](\d+)["']""").find(html)?.groupValues?.get(1)
+    val animeId = idFromWatch?.takeIf { it.isNotBlank() }
+        ?: idFromAny?.takeIf { it.isNotBlank() }
+        ?: idFromRegex
+    BCLog.d("AniKoto animeId: watch=$idFromWatch any=$idFromAny regex=$idFromRegex → $animeId")
+    if (animeId == null) return null
+
+    val listUrl = "$ANIKOTO_DOMAIN/ajax/episode/list/$animeId"
+    val listRaw = try {
+        app.get(listUrl, headers = anikotoAjaxHeaders(seriesUrl)).text
     } catch (e: Exception) {
         BCLog.e("AniKoto ep list failed: ${e.message}"); return null
     }
+    BCLog.d("AniKoto ep list: len=${listRaw.length} head=${listRaw.take(120).replace('\n',' ')}")
+    val listJson = anikotoResultString(listRaw)
+    BCLog.d("AniKoto ep list parsed: len=${listJson.length}")
     if (listJson.isBlank()) return null
+
     val listDoc = Jsoup.parse(listJson)
-    val epEl = listDoc.select("a[data-ids]")
-        .firstOrNull { it.attr("data-num").toIntOrNull() == episode }
-        ?: listDoc.selectFirst("a[data-ids]") ?: return null
+    val allEp = listDoc.select("a[data-ids]")
+    BCLog.d("AniKoto ep elements: ${allEp.size}")
+    if (allEp.isEmpty()) return null
+
+    val epEl = allEp.firstOrNull { it.attr("data-num").toIntOrNull() == episode }
+        ?: allEp.firstOrNull()
+    BCLog.d("AniKoto picked ep: data-num=${epEl.attr("data-num")} data-ids=${epEl.attr("data-ids").take(60)}")
     return epEl.attr("data-ids").takeIf { it.isNotBlank() }
 }
 
 private suspend fun anikotoResolveServers(serverIds: String, referer: String): List<AnikotoServerEntry> {
-    val listJson = try {
-        anikotoResultString(app.get("$ANIKOTO_DOMAIN/ajax/server/list?servers=$serverIds", headers = anikotoAjaxHeaders(referer)).text)
+    val listRaw = try {
+        app.get("$ANIKOTO_DOMAIN/ajax/server/list?servers=$serverIds", headers = anikotoAjaxHeaders(referer)).text
     } catch (e: Exception) {
         BCLog.e("AniKoto server list failed: ${e.message}"); return emptyList()
     }
+    BCLog.d("AniKoto server list: len=${listRaw.length} head=${listRaw.take(120).replace('\n',' ')}")
+    val listJson = anikotoResultString(listRaw)
+    BCLog.d("AniKoto server list parsed: len=${listJson.length}")
     if (listJson.isBlank()) return emptyList()
     val doc = Jsoup.parse(listJson)
+    BCLog.d("AniKoto div.type=${doc.select("div.type").size} li[data-link-id]=${doc.select("li[data-link-id]").size}")
     val out = mutableListOf<AnikotoServerEntry>()
     for (block in doc.select("div.type")) {
         val sType = block.attr("data-type").ifBlank { "sub" }
@@ -570,8 +591,13 @@ private suspend fun anikotoResolveServers(serverIds: String, referer: String): L
 }
 
 private suspend fun anikotoResolvePlayerUrl(linkId: String, referer: String): String? = try {
-    anikotoResultUrl(app.get("$ANIKOTO_DOMAIN/ajax/server/$linkId", headers = anikotoAjaxHeaders(referer)).text)
-} catch (_: Exception) { null }
+    val raw = app.get("$ANIKOTO_DOMAIN/ajax/server/$linkId", headers = anikotoAjaxHeaders(referer)).text
+    BCLog.d("AniKoto server/$linkId: len=${raw.length} head=${raw.take(120).replace('\n',' ')}")
+    anikotoResultUrl(raw)
+} catch (e: Exception) {
+    BCLog.e("AniKoto server/$linkId failed: ${e.message}")
+    null
+}
 
 private suspend fun anikotoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val series = anikotoFindSeries(q.title) ?: return emptyList()
