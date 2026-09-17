@@ -14,10 +14,10 @@ import kotlin.random.Random
 
 private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
 private const val MB_SECRET_ALT_B64 = "XQn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
-private const val MB_VERSION_CODE = 50020126L
-private const val MB_VERSION_NAME = "4.0.02.0831.03"
+private val MB_VERSION_CODE: Long = (BuildConfig.MB_VERSION_CODE.toLongOrNull() ?: 50020126L)
+private val MB_VERSION_NAME: String = BuildConfig.MB_VERSION_NAME.ifBlank { "4.0.02.0831.03" }
 private const val MB_PACKAGE = "com.community.mbox.in"
-private const val MB_UA = "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+private val MB_UA = "com.community.mbox.in/$MB_VERSION_CODE (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
 private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
 private val MB_HOSTS = listOf(
@@ -159,7 +159,6 @@ private fun buildHeaders(
 // ══════════════════════════════════════════════════════════════
 private var mbSession: String? = null
 
-// ── JWT expiry parser for session persistence ──
 private fun parseJwtExp(token: String): Long {
     return try {
         val parts = token.split(".")
@@ -174,7 +173,6 @@ private fun parseJwtExp(token: String): Long {
     } catch (e: Exception) { 0L }
 }
 
-// ── restore session from disk on boot ──
 fun restoreMbSession() {
     val tok = Settings.getMbToken() ?: return
     val exp = Settings.getMbTokenExp()
@@ -366,13 +364,11 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
             if (it.toIntOrNull() != null) "${it}p" else it
         } ?: o.optString("quality").ifBlank { "Auto" }
 
-        // ── duration in seconds (try common MB field names) ──
         var dur = o.optLong("duration", 0L)
         if (dur <= 0) dur = o.optLong("durationSeconds", 0L)
         if (dur <= 0) dur = o.optLong("length", 0L)
         if (dur <= 0) dur = o.optLong("durationMs", 0L).let { if (it > 0) it / 1000 else 0 }
 
-        // ── diagnostic — dumps every field we might filter on ──
         val idTypeVal = o.optString("idType")
         val formatVal = o.optString("format")
         val sizeVal = o.optString("size")
@@ -390,13 +386,5 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         ))
     }
     BCLog.d("MB play [$audioLabel]: ${out.size} streams")
-    return out
-}
-    val idTypeVal = o.optString("idType")
-    val formatVal = o.optString("format")
-    val sizeVal = o.optString("size")
-    val codecVal = o.optString("codecName")
-    val urlHead = url.take(70)
-    BCLog.d("MB raw [$audioLabel] dur=${dur}s idType=$idTypeVal fmt=$formatVal codec=$codecVal size=$sizeVal url=$urlHead")
     return out
 }
