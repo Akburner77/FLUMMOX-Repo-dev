@@ -555,7 +555,7 @@ private suspend fun anikotoGetServerIds(seriesUrl: String, episode: Int): String
     if (allEp.isEmpty()) return null
 
     val epEl = allEp.firstOrNull { it.attr("data-num").toIntOrNull() == episode }
-        ?: allEp.firstOrNull()
+    ?: allEp.firstOrNull() ?: return null
     BCLog.d("AniKoto picked ep: data-num=${epEl.attr("data-num")} data-ids=${epEl.attr("data-ids").take(60)}")
     return epEl.attr("data-ids").takeIf { it.isNotBlank() }
 }
