@@ -356,8 +356,8 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         ?: root.optJSONArray("videos")
         ?: root.optJSONArray("list")
         ?: return emptyList()
-        val out = mutableListOf<MBStream>()
-        for (i in 0 until arr.length()) {
+    val out = mutableListOf<MBStream>()
+    for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
@@ -366,18 +366,32 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
             if (it.toIntOrNull() != null) "${it}p" else it
         } ?: o.optString("quality").ifBlank { "Auto" }
 
-        // ── duration (try common MB field names) ──
+        // ── duration in seconds (try common MB field names) ──
         var dur = o.optLong("duration", 0L)
         if (dur <= 0) dur = o.optLong("durationSeconds", 0L)
         if (dur <= 0) dur = o.optLong("length", 0L)
         if (dur <= 0) dur = o.optLong("durationMs", 0L).let { if (it > 0) it / 1000 else 0 }
 
-        // ── one-time raw key dump per language so we can verify field names ──
-        BCLog.d("MB raw [$audioLabel] keys=${o.keys().asSequence().toList()} dur=${dur}s")
+        // ── diagnostic — dumps every field we might filter on ──
+        val idTypeVal = o.optString("idType")
+        val formatVal = o.optString("format")
+        val sizeVal = o.optString("size")
+        val codecVal = o.optString("codecName")
+        val urlHead = url.take(70)
+        BCLog.d("MB raw [$audioLabel] dur=${dur}s idType=$idTypeVal fmt=$formatVal codec=$codecVal size=$sizeVal url=$urlHead")
 
-        out.add(MBStream(url, quality, o.optString("size").ifBlank { null },
-            o.optString("signCookie").ifBlank { null }, audioLabel, dur))
+        out.add(MBStream(
+            url = url,
+            quality = quality,
+            size = sizeVal.ifBlank { null },
+            signCookie = o.optString("signCookie").ifBlank { null },
+            audio = audioLabel,
+            durationSec = dur
+        ))
     }
+    BCLog.d("MB play [$audioLabel]: ${out.size} streams")
+    return out
+}
     val idTypeVal = o.optString("idType")
     val formatVal = o.optString("format")
     val sizeVal = o.optString("size")
