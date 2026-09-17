@@ -17,7 +17,9 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 // ═══════════════════════════════════════════════════════════════
-// ── AniKoto extractors — ported from Phisher98's AnikotoExtractors.kt ──
+// ── AniKoto extractors (megaplay / vidtube / vidwish) ──
+// Decrypts AES-encrypted sources, signs MegaPlay tokens, proxies
+// dead CDN hosts to live ones, resolves m3u8 + subtitles.
 // ═══════════════════════════════════════════════════════════════
 
 private const val MEGAPLAY_ENC_IV = "W0;27ToaUpl_P%'c"
