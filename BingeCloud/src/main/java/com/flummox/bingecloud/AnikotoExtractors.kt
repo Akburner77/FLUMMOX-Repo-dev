@@ -79,7 +79,7 @@ private fun b64UrlNoPad(bytes: ByteArray): String =
 fun anikotoSignMegaPlayUrl(url: String): String {
     if (url.contains("token=")) return url
     val m = Regex("/([a-f0-9]{32})/([a-f0-9]{32})/", RegexOption.IGNORE_CASE).find(url) ?: return url
-    val payload = "${(System.currentTimeMillis() / 1000) + 90}|${m.groupValues[1]}/${m.groupValues[2]}"
+    val payload = "${(System.currentTimeMillis() / 1000) + 600}|${m.groupValues[1]}/${m.groupValues[2]}"
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(SecretKeySpec(MEGAPLAY_TOKEN_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256"))
     val sig = mac.doFinal(payload.toByteArray(Charsets.UTF_8))
@@ -182,6 +182,7 @@ suspend fun anikotoExtractMegaPlayUrl(
     if (m3u8.isNullOrBlank()) { BCLog.d("AniKoto: no m3u8"); return }
 
     val signed = anikotoSignMegaPlayUrl(m3u8)
+    BCLog.d("AniKoto emit [$label] ref=$host/ url=$signed")
 
     val link = newExtractorLink(
         source = "AniKoto",
