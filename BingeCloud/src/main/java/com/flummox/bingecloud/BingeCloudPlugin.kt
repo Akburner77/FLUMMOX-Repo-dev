@@ -20,6 +20,10 @@ class BingeCloudPlugin : Plugin() {
         com.flummox.bingecore.Prewarm.fire()
 
         registerMainAPI(BingeCloudProvider())
+        registerMainAPI(AnikotoProvider())
+        registerExtractorAPI(AnikotoMegaPlay())
+        registerExtractorAPI(AnikotoVidtube())
+        registerExtractorAPI(AnikotoVidwish())
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
         registerExtractorAPI(Filepress())
