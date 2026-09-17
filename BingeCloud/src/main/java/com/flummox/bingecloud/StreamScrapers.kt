@@ -10,6 +10,9 @@ import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
 
+// ═══════════════════════════════════════════
+// ── DATA MODELS ──
+// ═══════════════════════════════════════════
 data class StreamQuery(
     val title: String,
     val year: String,
@@ -29,10 +32,11 @@ data class ScrapedMirror(
     val headers: Map<String, String>? = null
 )
 
-// ── 24h-cached GitHub domain resolver ──
+// ═══════════════════════════════════════════
+// ── DOMAIN RESOLVER (24h cached) ──
+// ═══════════════════════════════════════════
 private const val DOMAIN_JSON_URL = "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json"
 private const val DOMAIN_CACHE_TTL = 24 * 60 * 60 * 1000L
-private val domainLock = Any()
 
 private suspend fun resolveDomain(key: String, fallback: String): String {
     val cached = BCCache.get(DOMAIN_JSON_URL, DOMAIN_CACHE_TTL)
@@ -42,7 +46,6 @@ private suspend fun resolveDomain(key: String, fallback: String): String {
             if (live.startsWith("http")) live else fallback
         } catch (_: Exception) { fallback }
     }
-
     return try {
         val json = app.get(DOMAIN_JSON_URL).text
         BCCache.put(DOMAIN_JSON_URL, json)
@@ -54,20 +57,31 @@ private suspend fun resolveDomain(key: String, fallback: String): String {
     }
 }
 
+// ═══════════════════════════════════════════
+// ── TITLE MATCHING ──
+// ═══════════════════════════════════════════
 private fun normalize(s: String): String =
     s.lowercase().replace(Regex("""[^a-z0-9]+"""), " ").trim()
 
-// ── strip noise words so "Breaking Bad S5" matches "Breaking Bad" ──
-private fun stripQualifiers(s: String): String =
-    s.lowercase()
-        .replace(Regex("""\b(season|s)\s*\d+\b"""), "")
-        .replace(Regex("""\b(complete|web-?dl|bluray|blu-ray|hdrip|hindi|dubbed|dual|audio|episodes?|added|full|movie|series|org|dd5\.?1|hevc|x264|x265|10bit|esubs|multi)\b"""), "")
-        .replace(Regex("""\b(19|20)\d{2}\b"""), "")
-        .replace(Regex("""[^a-z0-9 ]"""), " ")
-        .replace(Regex("""\s+"""), " ")
-        .trim()
+private val STOP_WORDS = setOf(
+    "download", "the", "a", "an", "of", "and", "or", "in", "on", "at", "to",
+    "full", "movie", "series", "episode", "episodes", "season", "complete",
+    "watch", "online", "free", "hd", "web", "webdl", "webrip", "bluray",
+    "hdrip", "dubbed", "dual", "audio", "hindi", "english", "korean",
+    "japanese", "tamil", "telugu", "org", "esubs", "multi"
+)
 
-private fun titleMatches(a: String, b: String): Boolean {
+private fun stripQualifiers(s: String): String {
+    val cleaned = s.lowercase()
+        .replace(Regex("""\b(season|s)\s*\d+\b"""), " ")
+        .replace(Regex("""\b(19|20)\d{2}\b"""), " ")
+        .replace(Regex("""[^a-z0-9 ]"""), " ")
+    val tokens = cleaned.split(" ").map { it.trim() }
+        .filter { it.isNotBlank() && it !in STOP_WORDS }
+    return tokens.joinToString(" ")
+}
+
+fun titleMatches(a: String, b: String): Boolean {
     val sa = stripQualifiers(a)
     val sb = stripQualifiers(b)
     if (sa.isEmpty() || sb.isEmpty()) return false
@@ -75,14 +89,18 @@ private fun titleMatches(a: String, b: String): Boolean {
 
     val ta = sa.split(" ").filter { it.isNotBlank() }.toSet()
     val tb = sb.split(" ").filter { it.isNotBlank() }.toSet()
-    if (ta.size < 2 || tb.size < 2) return false
+    if (ta.isEmpty() || tb.isEmpty()) return false
 
     val common = ta.intersect(tb)
-    if (common.size < 2) return false
+    if (common.isEmpty()) return false
 
-    val queryInCandidate = ta.count { it in tb }.toFloat() / ta.size
-    val candidateInQuery = tb.count { it in ta }.toFloat() / tb.size
-    return queryInCandidate >= 0.75f && candidateInQuery >= 0.75f
+    if (ta.size == 1 || tb.size == 1) {
+        return common.size == minOf(ta.size, tb.size) && common.size == 1
+    }
+
+    val queryInCandidate = common.size.toFloat() / ta.size
+    val candidateInQuery = common.size.toFloat() / tb.size
+    return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
 }
 
 private fun extractSeasons(title: String): List<Int> =
@@ -96,17 +114,9 @@ private fun pageHasSeason(title: String, targetSeason: Int): Boolean {
     return seasons.contains(targetSeason)
 }
 
-private fun prettyAudio(raw: String): String {
-    val l = raw.lowercase()
-    return when {
-        l.contains("original") -> "Original"
-        l.contains("hindi") -> "Hindi"
-        l.contains("esla") || l.contains("spanish") -> "Spanish"
-        l.contains("ptbr") || l.contains("portug") -> "Portuguese"
-        else -> raw.replace(Regex("""(?i)\s*\(?\s*(dub|audio)\s*\)?"""), " ").trim().ifBlank { "Auto" }
-    }
-}
-
+// ═══════════════════════════════════════════
+// ── HTTP HELPERS ──
+// ═══════════════════════════════════════════
 private suspend fun cachedGet(url: String): String? {
     BCCache.get(url)?.let { return it }
     return try {
@@ -126,7 +136,9 @@ private suspend fun safeGet(url: String): org.jsoup.nodes.Document? {
     }
 }
 
-// ═══════════════════════════════════════════ VegaMovies
+// ═══════════════════════════════════════════
+// ── VegaMovies ──
+// ═══════════════════════════════════════════
 private suspend fun vegamoviesFindPage(title: String, year: String, type: String, season: Int): String? {
     val domain = resolveDomain("vegamovies", "https://vegamovies.mq")
     BCLog.d("VM: searching '$title' S$season")
@@ -199,7 +211,9 @@ private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, epi
     return out
 }
 
-// ═══════════════════════════════════════════ MoviesDrive
+// ═══════════════════════════════════════════
+// ── MoviesDrive ──
+// ═══════════════════════════════════════════
 private suspend fun moviesdriveFindPage(title: String, year: String, type: String, season: Int): String? {
     val domain = resolveDomain("moviesdrive", "https://new4.moviesdrive.christmas")
     BCLog.d("MD: searching '$title' S$season")
@@ -314,7 +328,9 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
     return out
 }
 
-// ═══════════════════════════════════════════ HDhub4u
+// ═══════════════════════════════════════════
+// ── HDhub4u ──
+// ═══════════════════════════════════════════
 private suspend fun hdhub4uFindPage(title: String, year: String, type: String, season: Int): String? {
     val domain = resolveDomain("hdhub4u", "https://new5.hdhub4u.cl")
     return try {
@@ -368,7 +384,9 @@ private suspend fun hdhub4uExtractRaw(pageUrl: String): List<ScrapedMirror> {
     return out
 }
 
-// ═══════════════════════════════════════════ MovieBox
+// ═══════════════════════════════════════════
+// ── MovieBox ──
+// ═══════════════════════════════════════════
 private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = coroutineScope {
     val results = try { mbSearch(q.title) } catch (e: Exception) { emptyList() }
     if (results.isEmpty()) return@coroutineScope emptyList()
@@ -394,18 +412,40 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
 
     BCLog.d("MB total: ${allStreams.size} streams / ${languages.size} langs")
 
-    allStreams.distinctBy { it.url }.map {
+    allStreams
+    .distinctBy { it.realUrl }
+    .filter { it.durationSec == 0L || it.durationSec >= 120L }
+    .map {
         ScrapedMirror(
             quality = it.quality.ifBlank { "Auto" },
             mirror = prettyAudio(it.audio ?: "MovieBox"),
-            url = it.url,
+            url = it.realUrl,
             source = "MB",
             headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
         )
     }
 }
 
-// ═══════════════════════════════════════════ Wrapper
+private fun prettyAudio(raw: String): String {
+    val l = raw.lowercase()
+    return when {
+        l.contains("original") -> "Original"
+        l.contains("hindi") -> "Hindi"
+        l.contains("esla") || l.contains("spanish") -> "Spanish"
+        l.contains("ptbr") || l.contains("portug") -> "Portuguese"
+        l.contains("english") -> "English"
+        l.contains("tamil") -> "Tamil"
+        l.contains("telugu") -> "Telugu"
+        l.contains("kannada") -> "Kannada"
+        l.contains("malayalam") -> "Malayalam"
+        l.contains("bengali") -> "Bengali"
+        else -> raw.replace(Regex("""(?i)\s*\(?\s*(dub|audio)\s*\)?"""), " ").trim().ifBlank { "Auto" }
+    }
+}
+
+// ═══════════════════════════════════════════
+// ── Wrapper resolution ──
+// ═══════════════════════════════════════════
 suspend fun resolveWrapper(url: String): String? {
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
@@ -418,8 +458,10 @@ suspend fun resolveWrapper(url: String): String? {
     return null
 }
 
-// ═══════════════════════════════════════════ Entry
-private const val PER_SOURCE_TIMEOUT_MS = 6000L
+// ═══════════════════════════════════════════
+// ── Entry point ──
+// ═══════════════════════════════════════════
+private const val PER_SOURCE_TIMEOUT_MS = 25000L
 
 suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     BCLog.section("scrapeAllSources: ${q.title} (${q.year}) ${q.type} S${q.season}E${q.episode}")
@@ -458,6 +500,11 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                 } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
             } ?: run { BCLog.d("HDH timeout"); emptyList() }
         })
+        if (Settings.isSrcGogo()) jobs.add(async {
+            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+                try { gogoExtractRaw(q) } catch (e: Exception) { BCLog.e("Gogo task failed: ${e.message}"); emptyList() }
+            } ?: run { BCLog.d("Gogo timeout"); emptyList() }
+        })
         if (Settings.isSrcMovieBox()) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
                 try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
@@ -470,7 +517,8 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         val md = all.count { it.source == "MD" }
         val hdh = all.count { it.source == "HDH" }
         val mb = all.count { it.source == "MB" }
-        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb total=${all.size}")
+        val gogo = all.count { it.source == "GOGO" }
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb GOGO=$gogo total=${all.size}")
         all
     }
 }

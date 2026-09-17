@@ -9,6 +9,12 @@ android {
     compileSdk = 35
     defaultConfig {
         minSdk = 21
+        val tmdbKey = (System.getenv("TMDB_API_KEY") ?: "").trim()
+        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbKey\"")
+        val mbVerName = (System.getenv("MB_VERSION_NAME_ENV") ?: "").trim()
+        buildConfigField("String", "MB_VERSION_NAME", "\"$mbVerName\"")
+        val mbVerCode = (System.getenv("MB_VERSION_CODE_ENV") ?: "").trim()
+        buildConfigField("String", "MB_VERSION_CODE", "\"$mbVerCode\"")
     }
     buildFeatures {
         buildConfig = true
@@ -26,10 +32,10 @@ kotlin {
 }
 
 cloudstream {
-    description = "BingeCloud - Movies & TV Series"
+    description = "BingeCloud - TV Series, Movies, Anime"
     authors = listOf("FlummoxGamer")
     status = 1
-    tvTypes = listOf("Movie", "TvSeries")
+    tvTypes = listOf("Movies","TV Series","Anime")
     language = "en"
     iconUrl = "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/BingeCloud/icon.png"
 }
