@@ -1,45 +1,6 @@
 package com.flummox.bingecloud
 
 import android.util.Base64
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
-import com.lagradost.cloudstream3.app
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.net.URI
-import java.security.MessageDigest
-import java.util.Locale
-import java.util.UUID
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
-import kotlin.random.Random
-
-private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
-private const val MB_SECRET_ALT_B64 = "Xqn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
-
-// ── live app values from com.community.oneroom (v4.0.02.0903.02, code 50020128) ──
-// BuildConfig values are populated by CI when the version-fetch step succeeds.
-// Fallback hardcoded values are used when CI fetch fails.
-private val MB_VERSION_CODE: Long =
-    (BuildConfig.MB_VERSION_CODE.toLongOrNull() ?: 50020128L)
-private val MB_VERSION_NAME: String =
-    BuildConfig.MB_VERSION_NAME.ifBlank { "4.0.02.0903.02" }
-private const val MB_PACKAGE = "com.community.oneroom"
-private const val MB_INSTALL_STORE = "ps"
-
-private val MB_UA = "$MB_PACKAGE/$MB_VERSION_CODE (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
-private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
-
-private val MB_HOSTS = listOf(
-    "api6.aoneroom.com",
-    "api5.aoneroom.com",
-    "api4.aoneroom.com",
-    "api4sg.aoneroom.com",
-    "api3.aoneroom.com"
-package com.flummox.bingecloud
-
-import android.util.Base64
 import com.lagradost.cloudstream3.app
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -68,9 +29,6 @@ private val MB_HOSTS = listOf(
 private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
 private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
 
-// ══════════════════════════════════════════════════════════════
-// ── DEVICE IDENTITY ──
-// ══════════════════════════════════════════════════════════════
 private val mbDeviceIdLock = Any()
 private var mbDeviceIdCache: String? = null
 
@@ -88,9 +46,6 @@ private fun clientInfo(): String {
     return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"$MB_INSTALL_STORE","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
 }
 
-// ══════════════════════════════════════════════════════════════
-// ── CRYPTO ──
-// ══════════════════════════════════════════════════════════════
 private fun md5Hex(data: ByteArray): String =
     MessageDigest.getInstance("MD5").digest(data).joinToString("") { "%02x".format(it) }
 
@@ -148,9 +103,6 @@ private fun buildHeaders(method: String, url: String, contentType: String, accep
     return map
 }
 
-// ══════════════════════════════════════════════════════════════
-// ── SESSION ──
-// ══════════════════════════════════════════════════════════════
 private var mbSession: String? = null
 
 private fun parseJwtExp(token: String): Long = try {
@@ -193,9 +145,6 @@ private suspend fun ensureSession(): String? {
     return bootstrapToken()
 }
 
-// ══════════════════════════════════════════════════════════════
-// ── GET / POST ──
-// ══════════════════════════════════════════════════════════════
 private suspend fun mbGet(path: String, query: String? = null, retried: Boolean = false): JSONObject? {
     val cacheKey = "mb:get:$path?${query ?: ""}"
     BCCache.get(cacheKey)?.let { return try { JSONObject(it) } catch (_: Exception) { null } }
@@ -220,8 +169,8 @@ private suspend fun mbGet(path: String, query: String? = null, retried: Boolean 
 
 data class MBSubject(val subjectId: String, val title: String, val year: Int?, val type: Int)
 data class MBStream(
-    val url: String,          // raw URL from API (often placeholder)
-    val realUrl: String,      // extracted from signCookie (real CDN URL) — use this!
+    val url: String,
+    val realUrl: String,
     val quality: String,
     val size: String?,
     val signCookie: String? = null,
@@ -229,21 +178,16 @@ data class MBStream(
     val durationSec: Long = 0L
 )
 
-// ══════════════════════════════════════════════════════════════
-// ── CLOUDFRONT POLICY EXTRACTOR (the missing piece) ──
-// ══════════════════════════════════════════════════════════════
 private fun extractPolicyResource(signCookie: String?): String? {
     if (signCookie.isNullOrBlank()) return null
     val match = Regex("CloudFront-Policy=([^;]+)").find(signCookie) ?: return null
     val policyRaw = match.groupValues[1]
 
-    // try URL-safe variant first
     var decoded: String? = null
     val urlSafe = policyRaw.replace('-', '+').replace('~', '/').replace('_', '=')
     val paddedUrlSafe = if (urlSafe.length % 4 > 0) urlSafe + "=".repeat(4 - urlSafe.length % 4) else urlSafe
     decoded = try { String(Base64.decode(paddedUrlSafe, Base64.DEFAULT)) } catch (_: Exception) { null }
 
-    // fallback standard variant
     if (decoded == null) {
         val std = policyRaw.replace('-', '+').replace('_', '/')
         val paddedStd = if (std.length % 4 > 0) std + "=".repeat(4 - std.length % 4) else std
@@ -262,9 +206,6 @@ private fun extractPolicyResource(signCookie: String?): String? {
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-// ── SEARCH ──
-// ══════════════════════════════════════════════════════════════
 suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     val cacheKey = "mb:search:$query:$page"
     BCCache.get(cacheKey)?.let { return parseSearchResults(it) }
@@ -309,9 +250,6 @@ private fun parseSearchResults(text: String): List<MBSubject> {
 suspend fun mbDetail(subjectId: String): JSONObject? =
     mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
-// ══════════════════════════════════════════════════════════════
-// ── LANGUAGES ──
-// ══════════════════════════════════════════════════════════════
 suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
     val detail = try { mbDetail(originalSubjectId) } catch (_: Exception) { null }
     val dubs = detail?.optJSONObject("data")?.optJSONArray("dubs")
@@ -334,9 +272,6 @@ suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
     return out
 }
 
-// ══════════════════════════════════════════════════════════════
-// ── PLAY-INFO ──
-// ══════════════════════════════════════════════════════════════
 suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
@@ -358,8 +293,6 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         if (dur <= 0) dur = o.optLong("durationMs", 0L).let { if (it > 0) it / 1000 else 0 }
 
         val signCookie = o.optString("signCookie").ifBlank { null }
-
-        // ── THE FIX: extract real CDN URL from CloudFront policy ──
         val realUrl = extractPolicyResource(signCookie) ?: url
 
         val urlHead = realUrl.take(120)
