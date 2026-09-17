@@ -14,10 +14,10 @@ import com.lagradost.cloudstream3.addDubStatus
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.fixUrl
 import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -62,14 +62,12 @@ class AnikotoProvider : MainAPI() {
         "Referer" to referer
     )
 
-    // ── home ──
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val doc = app.get("${request.data}?page=$page", headers = browserHeaders).document
         val items = doc.select("div.ani.items > div.item").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, items)
     }
 
-    // ── search ──
     override suspend fun search(query: String): List<SearchResponse> {
         val doc = app.get("$mainUrl/filter?keyword=$query", headers = browserHeaders).document
         return doc.select("div.ani.items > div.item").mapNotNull { it.toSearchResult() }
@@ -108,7 +106,6 @@ class AnikotoProvider : MainAPI() {
         }
     }
 
-    // ── load ──
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url, headers = browserHeaders).document
 
@@ -210,23 +207,18 @@ class AnikotoProvider : MainAPI() {
             ?.url
 
         val tvType = when {
-            isMovie || dubEpisodes.isEmpty() && subEpisodes.isEmpty() -> TvType.AnimeMovie
-            else -> TvType.Anime
-        }
-
-        val tvType = when {
             isMovie || (dubEpisodes.isEmpty() && subEpisodes.isEmpty()) -> TvType.AnimeMovie
             else -> TvType.Anime
         }
 
-       val allEpisodes = (subEpisodes + dubEpisodes).sortedBy { it.episode }
+        val allEpisodes = (subEpisodes + dubEpisodes).sortedBy { it.episode }
 
-       return newTvSeriesLoadResponse(title, url, tvType, allEpisodes) {
-           this.posterUrl = poster
-           this.backgroundPosterUrl = backgroundPoster
-           this.plot = description
-           this.tags = genres
-      }
+        return newTvSeriesLoadResponse(title, url, tvType, allEpisodes) {
+            this.posterUrl = poster
+            this.backgroundPosterUrl = backgroundPoster
+            this.plot = description
+            this.tags = genres
+        }
     }
 
     private fun jsonResultString(json: String): String {
@@ -236,7 +228,6 @@ class AnikotoProvider : MainAPI() {
         } catch (_: Exception) { "" }
     }
 
-    // ── loadLinks ──
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
