@@ -189,7 +189,7 @@ suspend fun anikotoExtractMegaPlayUrl(
         url = signed,
         type = ExtractorLinkType.M3U8
     ) {
-        this.referer = referer ?: "$host/"
+        this.referer = "$host/"
         this.headers = playbackHeaders
     }
     callback(link)
