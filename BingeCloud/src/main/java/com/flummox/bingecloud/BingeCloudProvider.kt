@@ -18,8 +18,6 @@ import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
-import java.net.URLEncoder
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
@@ -55,51 +53,23 @@ open class BingeCloudProvider : MainAPI() {
 
     // ── home ──
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-    val parts = request.data.split(ROW_TAG)
-    if (parts.size < 2) return null
-    lastHomeRenderMs = System.currentTimeMillis()
-    val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-        .mapNotNull { it.toSearchResponse() }
-    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        val parts = request.data.split(ROW_TAG)
+        if (parts.size < 2) return null
+        lastHomeRenderMs = System.currentTimeMillis()
+        val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+            .mapNotNull { it.toSearchResponse() }
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
-
-// ── search ──
-override suspend fun search(query: String): List<SearchResponse>? {
-    val key = BuildConfig.TMDB_API_KEY
-    if (key.isBlank()) {
-        BCLog.e("TMDB key missing — falling back to Aiometa search")
-        return searchViaAiometa(query)
-    }
-    return searchViaTmdb(query, key)
-}
-
-private suspend fun searchViaTmdb(query: String, key: String): List<SearchResponse>? {
-    val out = mutableListOf<SearchResponse>()
-    try {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = "https://api.themoviedb.org/3/search/multi" +
-            "?api_key=$key&language=en-US&query=$encoded&page=1&include_adult=false"
-        val json = app.get(url).text
-        val parsed = tryParseJson<TmdbSearchResponse>(json)
-        parsed?.results?.forEach { item ->
-            item.toSearchResponse()?.let { out.add(it) }
-        }
-    } catch (e: Exception) {
-        BCLog.e("TMDB search failed: ${e.message}")
-    }
-    BCLog.d("TMDB search '$query': ${out.size} results")
-    return out
-}
 
     // ── search ──
-    private suspend fun searchViaAiometa(query: String): List<SearchResponse>? {
-    val results = mutableListOf<SearchResponse>()
-    for (t in listOf("movie", "series", "anime")) {
-        try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
-        catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
+    override suspend fun search(query: String): List<SearchResponse>? {
+        val results = mutableListOf<SearchResponse>()
+        for (t in listOf("movie", "series", "anime")) {
+            try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
+            catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
+        }
+        return results
     }
-    return results
-}
 
     private fun AioMeta.toSearchResponse(): SearchResponse? {
         val metaId = this.id ?: return null
@@ -115,31 +85,6 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
             this.posterUrl = this@toSearchResponse.poster
             this.year = yearInt
         }
-    }
-    private fun TmdbSearchItem.toSearchResponse(): SearchResponse? {
-    val id = this.id ?: return null
-    val mt = this.media_type ?: return null
-    if (mt != "movie" && mt != "tv") return null
-
-    val title = this.title ?: this.name ?: return null
-    val isAnime = mt == "tv"
-        && original_language == "ja"
-        && (genre_ids?.contains(16) == true)   // 16 = Animation
-
-    val tvType = when {
-        mt == "movie" -> TvType.Movie
-        isAnime -> TvType.Anime
-        else -> TvType.TvSeries
-    }
-
-    val loadType = if (mt == "movie") "movie" else "series"
-    val metaId = "tmdb:$id"
-    val year = (release_date ?: first_air_date)?.take(4)?.toIntOrNull()
-
-    return newMovieSearchResponse(title, "/$loadType$SEP$metaId", tvType) {
-        this.posterUrl = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" }
-        this.year = year
-    }
     }
 
     // ── load ──
@@ -167,13 +112,12 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
-        // ── prefetch: skip if triggered by home banner render ──
-            val sinceHome = System.currentTimeMillis() - lastHomeRenderMs
-            val fromHomeBanner = sinceHome in 0 until HOME_GRACE_MS
-            if (fromHomeBanner) {
-               BCLog.d("load() preview (no prefetch): ${name.take(40)} [${sinceHome}ms since home]")
-            }
-            if (Settings.isPrefetchEnabled() && !fromHomeBanner) {
+        val sinceHome = System.currentTimeMillis() - lastHomeRenderMs
+        val fromHomeBanner = sinceHome in 0 until HOME_GRACE_MS
+        if (fromHomeBanner) {
+            BCLog.d("load() preview (no prefetch): ${name.take(40)} [${sinceHome}ms since home]")
+        }
+        if (Settings.isPrefetchEnabled() && !fromHomeBanner) {
             val prefetchQuery: StreamQuery? = when {
                 tvType == TvType.Movie && videos.isEmpty() ->
                     StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
@@ -265,7 +209,6 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
         if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
         if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
-        // ── 1. sort: smart (by score + emoji) or raw (source order) ──
         val smartSort = Settings.isPrefilterEnabled()
         val pref = Settings.getQualityPref()
         val prefRank = qualityRank(pref)
@@ -296,11 +239,8 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
         BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency, smart=$smartSort)")
 
         val sem = Semaphore(concurrency)
-
-        // ── per-host concurrency cap (prevents rate limiting) ──
         val hostSems = ConcurrentHashMap<String, Semaphore>()
-        fun hostSem(host: String): Semaphore =
-            hostSems.getOrPut(host) { Semaphore(5) }
+        fun hostSem(host: String): Semaphore = hostSems.getOrPut(host) { Semaphore(5) }
 
         val perMirror: List<List<ExtractorLink>> = coroutineScope {
             finalOrder.map { (m, score) ->
@@ -310,40 +250,66 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
                         hostSem(host).withPermit {
                             try {
                                 val emoji = if (smartSort) LinkScore.emoji(score) else ""
-                                if (m.source == "GOGO") {
-                                val bag = mutableListOf<ExtractorLink>()
-                                    GogoCdn().getUrl(m.url, "", subtitleCallback) { bag.add(it) }
-                                if (bag.isEmpty()) HostHealth.recordFailure(host)
-                                else HostHealth.recordSuccess(host)
-                                bag
-                                } else if (m.source == "MB") {
-                                    val linkType = when {
-                                        m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
-                                        m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
-                                        else -> ExtractorLinkType.VIDEO
-                                    }
-                                    val display = "$emoji${m.quality} •MB ${m.mirror}"
-                                    BCLog.d("MB link: $display (score=$score)")
-                                    val hdrs = m.headers
-                                    val link = newExtractorLink("MovieBox", display, m.url, linkType) {
-                                        this.referer = "https://h5.aoneroom.com/"
-                                        if (hdrs != null) this.headers = hdrs
-                                    }
-                                    HostHealth.recordSuccess("mb.local")
-                                    listOf(link)
-                                } else {
-                                    val finalUrl = resolveWrapper(m.url)
-                                    if (finalUrl == null) {
-                                        BCLog.d("unresolved: ${m.mirror}")
-                                        HostHealth.recordFailure(host)
-                                        emptyList()
-                                    } else {
+                                when (m.source) {
+                                    "GOGO" -> {
                                         val bag = mutableListOf<ExtractorLink>()
-                                        VCloud(m.source, m.mirror, m.quality, emoji)
-                                            .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
-                                        if (bag.isEmpty()) HostHealth.recordFailure(host)
-                                        else HostHealth.recordSuccess(host)
+                                        GogoCdn().getUrl(m.url, "", subtitleCallback) { bag.add(it) }
+                                        if (bag.isEmpty()) HostHealth.recordFailure(host) else HostHealth.recordSuccess(host)
                                         bag
+                                    }
+                                    "ANIKOTO" -> {
+                                        val bag = mutableListOf<ExtractorLink>()
+                                        val hashM3u8 = anikotoGetHashM3u8(m.url)
+                                        if (hashM3u8 != null) {
+                                            bag.add(newExtractorLink("AniKoto", "$emoji${m.mirror}", hashM3u8, ExtractorLinkType.M3U8) {
+                                                this.referer = "https://anikototv.to/"
+                                            })
+                                        } else {
+                                            val domain = hostOf(m.url)
+                                            val domainHost = "https://$domain"
+                                            val isMegaFam = domain.contains("megaplay", true) ||
+                                                    domain.contains("vidwish", true) ||
+                                                    domain.contains("vidtube", true)
+                                            if (isMegaFam) {
+                                                try {
+                                                    anikotoExtractMegaPlayUrl(m.url, "https://anikototv.to/", domainHost, "$emoji${m.mirror}", subtitleCallback) { bag.add(it) }
+                                                } catch (e: Exception) { BCLog.e("AniKoto resolve: ${e.message}") }
+                                            } else {
+                                                try { loadExtractor(m.url, "https://anikototv.to/", subtitleCallback) { bag.add(it) } } catch (_: Exception) {}
+                                            }
+                                        }
+                                        if (bag.isEmpty()) HostHealth.recordFailure(host) else HostHealth.recordSuccess(host)
+                                        bag
+                                    }
+                                    "MB" -> {
+                                        val linkType = when {
+                                            m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                            m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                            else -> ExtractorLinkType.VIDEO
+                                        }
+                                        val display = "$emoji${m.quality} •MB ${m.mirror}"
+                                        BCLog.d("MB link: $display (score=$score)")
+                                        val hdrs = m.headers
+                                        val link = newExtractorLink("MovieBox", display, m.url, linkType) {
+                                            this.referer = "https://h5.aoneroom.com/"
+                                            if (hdrs != null) this.headers = hdrs
+                                        }
+                                        HostHealth.recordSuccess("mb.local")
+                                        listOf(link)
+                                    }
+                                    else -> {
+                                        val finalUrl = resolveWrapper(m.url)
+                                        if (finalUrl == null) {
+                                            BCLog.d("unresolved: ${m.mirror}")
+                                            HostHealth.recordFailure(host)
+                                            emptyList()
+                                        } else {
+                                            val bag = mutableListOf<ExtractorLink>()
+                                            VCloud(m.source, m.mirror, m.quality, emoji)
+                                                .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
+                                            if (bag.isEmpty()) HostHealth.recordFailure(host) else HostHealth.recordSuccess(host)
+                                            bag
+                                        }
                                     }
                                 }
                             } catch (e: Exception) {
@@ -360,7 +326,6 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
         perMirror.flatten().forEach { callback.invoke(it) }
         BCLog.d("loadLinks done (${perMirror.flatten().size} links)")
 
-        // ── 4. prefetch next episode ──
         if (Settings.isPrefetchEnabled() && query.type == "series"
             && query.nextSeason > 0 && query.nextEpisode > 0) {
             val nextQ = StreamQuery(
@@ -445,19 +410,3 @@ private fun decodeQuery(s: String): StreamQuery? = try {
         o.optInt("ns", 0), o.optInt("ne", 0)
     )
 } catch (e: Exception) { null }
-
-
-// ── TMDB search DTOs ──
-private data class TmdbSearchResponse(val results: List<TmdbSearchItem>? = null)
-
-private data class TmdbSearchItem(
-    val id: Int? = null,
-    val media_type: String? = null,
-    val title: String? = null,
-    val name: String? = null,
-    val poster_path: String? = null,
-    val release_date: String? = null,
-    val first_air_date: String? = null,
-    val original_language: String? = null,
-    val genre_ids: List<Int>? = null
-)
