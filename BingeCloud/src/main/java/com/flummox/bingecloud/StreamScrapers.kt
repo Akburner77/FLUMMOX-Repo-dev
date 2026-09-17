@@ -5,11 +5,11 @@ import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
 
 // ═══════════════════════════════════════════
 // ── DATA MODELS ──
@@ -441,7 +441,6 @@ private fun prettyAudio(raw: String): String {
 // ── AniKoto ──
 // ═══════════════════════════════════════════
 private const val ANIKOTO_DOMAIN = "https://anikototv.to"
-private const val ANIKOTO_API_SITE = "https://anikotoapi.site"
 private const val ANIKOTO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 
 private val anikotoBrowserHeaders = mapOf(
@@ -513,13 +512,14 @@ private suspend fun anikotoFindSeries(title: String): AnikotoSeries? {
         if (score > bestScore) {
             bestScore = score
             val full = if (href.startsWith("http")) href else "$ANIKOTO_DOMAIN$href"
-            val slug = full.substringAfterLast("/").trimEnd('/')
-            best = AnikotoSeries(full, candTitle, "", slug)
+            // strip trailing /ep-N to get the SERIES page URL, not the episode page
+            val seriesUrl = full.replace(Regex("""/ep-\d+/?$"""), "").trimEnd('/')
+            val slug = seriesUrl.substringAfterLast("/")
+            best = AnikotoSeries(seriesUrl, candTitle, "", slug)
         }
     }
     if (best == null) { BCLog.d("AniKoto: no match"); return null }
 
-    // fetch animeId from series page
     val seriesHtml = try {
         app.get(best.url, headers = anikotoBrowserHeaders).text
     } catch (_: Exception) { "" }
@@ -534,33 +534,6 @@ private suspend fun anikotoFindSeries(title: String): AnikotoSeries? {
 }
 
 private suspend fun anikotoGetServerIds(series: AnikotoSeries, episode: Int): String? {
-    // PRIMARY: try anikotoapi.site first (working third-party API)
-    val apiEpisodesUrl = "$ANIKOTO_API_SITE/episodes/${series.animeId}"
-    try {
-        val apiRes = app.get(apiEpisodesUrl, headers = anikotoBrowserHeaders).text
-        BCLog.d("AniKoto API ep list: len=${apiRes.length} head=${apiRes.take(200)}")
-        val apiJson = try { JSONObject(apiRes) } catch (_: Exception) { null }
-        if (apiJson != null) {
-            val arr = apiJson.optJSONArray("episodes") ?: apiJson.optJSONArray("data")
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    val ep = arr.optJSONObject(i) ?: continue
-                    val num = ep.optInt("number", ep.optInt("episode", -1))
-                    if (num == episode) {
-                        val ids = ep.optString("serverIds").ifBlank { ep.optString("servers") }
-                        if (ids.isNotBlank()) {
-                            BCLog.d("AniKoto API hit: ep=$num ids=${ids.take(40)}")
-                            return ids
-                        }
-                    }
-                }
-            }
-        }
-    } catch (e: Exception) {
-        BCLog.d("AniKoto API episodes failed: ${e.message}")
-    }
-
-    // FALLBACK: direct scrape
     if (series.animeId.isBlank()) return null
     val listJson = try {
         anikotoResultString(app.get("$ANIKOTO_DOMAIN/ajax/episode/list/${series.animeId}", headers = anikotoAjaxHeaders(series.url)).text)
@@ -604,7 +577,6 @@ private suspend fun anikotoResolvePlayerUrl(linkId: String, referer: String): St
             } catch (_: Exception) {}
         } catch (_: Exception) {}
     }
-    // POST fallback
     for (body in listOf("id=$encoded", "linkId=$encoded", "server=$encoded")) {
         try {
             val raw = app.post(
@@ -631,8 +603,10 @@ private suspend fun anikotoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         BCLog.e("AniKoto server list failed: ${e.message}"); return emptyList()
     }
     if (listJson.isBlank()) return emptyList()
-    val doc = Jsoup.parse(listJson)
 
+    BCLog.d("AniKoto server list HTML: ${listJson.replace('\n',' ')}")
+
+    val doc = Jsoup.parse(listJson)
     val entries = mutableListOf<Pair<String, String>>()
     for (block in doc.select("div.type")) {
         val sType = block.attr("data-type").ifBlank { "sub" }
