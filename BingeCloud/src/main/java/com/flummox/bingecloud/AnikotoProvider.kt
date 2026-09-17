@@ -1,7 +1,6 @@
 package com.flummox.bingecloud
 
 import com.lagradost.cloudstream3.AnimeSearchResponse
-import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
@@ -15,7 +14,7 @@ import com.lagradost.cloudstream3.addDubStatus
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.fixUrl
 import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.newAnimeLoadResponse
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
@@ -215,15 +214,19 @@ class AnikotoProvider : MainAPI() {
             else -> TvType.Anime
         }
 
-        val allEpisodes = subEpisodes + dubEpisodes
-
-        return newAnimeLoadResponse(title, url, tvType) {
-            this.posterUrl = poster
-            this.backgroundPosterUrl = backgroundPoster
-            this.plot = description
-            this.tags = genres
-            addEpisodes(DubStatus.Both, allEpisodes)
+        val tvType = when {
+            isMovie || (dubEpisodes.isEmpty() && subEpisodes.isEmpty()) -> TvType.AnimeMovie
+            else -> TvType.Anime
         }
+
+       val allEpisodes = (subEpisodes + dubEpisodes).sortedBy { it.episode }
+
+       return newTvSeriesLoadResponse(title, url, tvType, allEpisodes) {
+           this.posterUrl = poster
+           this.backgroundPosterUrl = backgroundPoster
+           this.plot = description
+           this.tags = genres
+      }
     }
 
     private fun jsonResultString(json: String): String {
