@@ -58,38 +58,43 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          echo "── Method 1: fetch MovieBox APK version ──"
+          PKG="com.community.mbox.in"
+          VNAME=""
+          VCODE=""
 
-          echo "→ Downloading APK..."
-          curl -sL --max-time 120 -o /tmp/mb.apk "https://d.apkpure.com/b/APK/com.community.mbox.in?version=latest" || true
-          ls -la /tmp/mb.apk 2>/dev/null
-          SIZE=$(stat -c%s /tmp/mb.apk 2>/dev/null || echo 0)
-          echo "→ APK size: $SIZE bytes"
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "→ APK download failed or too small — falling back to hardcoded"
-            echo "version_name=" >> $GITHUB_OUTPUT
-            echo "version_code=" >> $GITHUB_OUTPUT
-            exit 0
+          echo "── Method 1: fetch MovieBox version from metadata APIs ──"
+
+          # ── Source 1: Aptoide public API ──
+          echo "→ Aptoide..."
+          R1=$(curl -sL --max-time 20 "https://ws75.aptoide.com/api/7/app/get/package_name=$PKG")
+          echo "→ Aptoide resp: $(echo "$R1" | head -c 300)"
+          if echo "$R1" | grep -q '"versionName"'; then
+            VNAME=$(echo "$R1" | grep -oP '"versionName"\s*:\s*"\K[^"]+' | head -1)
+            VCODE=$(echo "$R1" | grep -oP '"versionCode"\s*:\s*"?\K[0-9]+' | head -1)
           fi
 
-          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt 2>/dev/null | sort -V | tail -1)
-          if [ -z "$AAPT" ]; then
-            AAPT=$(find /usr/local/lib/android/sdk/build-tools -name aapt 2>/dev/null | sort -V | tail -1)
-          fi
-          echo "→ aapt: $AAPT"
-          if [ -z "$AAPT" ]; then
-            echo "→ aapt not found — falling back"
-            echo "version_name=" >> $GITHUB_OUTPUT
-            echo "version_code=" >> $GITHUB_OUTPUT
-            exit 0
+          # ── Source 2: APKPure API ──
+          if [ -z "$VNAME" ]; then
+            echo "→ APKPure..."
+            R2=$(curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0" \
+              "https://api.pureapk.com/m/v3/cms/app_version?hl=en-US&package_name=$PKG")
+            echo "→ APKPure resp: $(echo "$R2" | head -c 300)"
+            if echo "$R2" | grep -q '"version"'; then
+              VNAME=$(echo "$R2" | grep -oP '"version"\s*:\s*"\K[^"]+' | head -1)
+              VCODE=$(echo "$R2" | grep -oP '"versionCode"\s*:\s*"?\K[0-9]+' | head -1)
+            fi
           fi
 
-          BADGING=$($AAPT dump badging /tmp/mb.apk 2>/dev/null | head -1)
-          echo "→ badging: $BADGING"
-          VNAME=$(echo "$BADGING" | grep -oP "versionName='\K[^']+")
-          VCODE=$(echo "$BADGING" | grep -oP "versionCode='\K[^']+")
-          echo "→ versionName=$VNAME versionCode=$VCODE"
+          # ── Source 3: APKMirror page scrape ──
+          if [ -z "$VNAME" ]; then
+            echo "→ APKMirror..."
+            R3=$(curl -sL --max-time 20 -H "User-Agent: Mozilla/5.0 (Linux; Android 13)" \
+              "https://www.apkmirror.com/apk/moviebox/moviebox/")
+            echo "→ APKMirror resp: $(echo "$R3" | head -c 300)"
+            VNAME=$(echo "$R3" | grep -oP 'Version:\s*[^<]*>\K[0-9][0-9.]*' | head -1)
+          fi
 
+          echo "→ FINAL: versionName='$VNAME' versionCode='$VCODE'"
           echo "version_name=$VNAME" >> $GITHUB_OUTPUT
           echo "version_code=$VCODE" >> $GITHUB_OUTPUT
 
@@ -114,7 +119,7 @@ jobs:
 
       - name: Patch plugins.json URL and bump version
         env:
-          NEW_VERSION: 189
+          NEW_VERSION: 190
           OUTPUT_BRANCH: ${{ steps.out.outputs.branch }}
         run: python3 src/scripts/patch_plugins.py
 
