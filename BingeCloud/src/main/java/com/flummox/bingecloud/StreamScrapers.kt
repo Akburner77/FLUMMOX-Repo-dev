@@ -412,7 +412,10 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
 
     BCLog.d("MB total: ${allStreams.size} streams / ${languages.size} langs")
 
-    allStreams.distinctBy { it.url }.map {
+    allStreams
+    .distinctBy { it.url }
+    .filter { it.durationSec <= 0L || it.durationSec >= 30L }   // drop MB placeholder ads (<30s)
+    .map {
         ScrapedMirror(
             quality = it.quality.ifBlank { "Auto" },
             mirror = prettyAudio(it.audio ?: "MovieBox"),
