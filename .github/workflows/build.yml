@@ -53,12 +53,53 @@ jobs:
           fi
           echo "SECRET OK — length ${#TMDB_API_KEY}"
 
+      - name: Fetch latest MovieBox version (soft-fail)
+        id: mbver
+        continue-on-error: true
+        run: |
+          set +e
+          echo "── Method 1: fetch MovieBox APK version ──"
+
+          echo "→ Downloading APK..."
+          curl -sL --max-time 120 -o /tmp/mb.apk "https://d.apkpure.com/b/APK/com.community.mbox.in?version=latest" || true
+          ls -la /tmp/mb.apk 2>/dev/null
+          SIZE=$(stat -c%s /tmp/mb.apk 2>/dev/null || echo 0)
+          echo "→ APK size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "→ APK download failed or too small — falling back to hardcoded"
+            echo "version_name=" >> $GITHUB_OUTPUT
+            echo "version_code=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt 2>/dev/null | sort -V | tail -1)
+          if [ -z "$AAPT" ]; then
+            AAPT=$(find /usr/local/lib/android/sdk/build-tools -name aapt 2>/dev/null | sort -V | tail -1)
+          fi
+          echo "→ aapt: $AAPT"
+          if [ -z "$AAPT" ]; then
+            echo "→ aapt not found — falling back"
+            echo "version_name=" >> $GITHUB_OUTPUT
+            echo "version_code=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          BADGING=$($AAPT dump badging /tmp/mb.apk 2>/dev/null | head -1)
+          echo "→ badging: $BADGING"
+          VNAME=$(echo "$BADGING" | grep -oP "versionName='\K[^']+")
+          VCODE=$(echo "$BADGING" | grep -oP "versionCode='\K[^']+")
+          echo "→ versionName=$VNAME versionCode=$VCODE"
+
+          echo "version_name=$VNAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VCODE" >> $GITHUB_OUTPUT
+
       - name: Build plugins
         working-directory: src
-        run: gradle make --no-daemon --no-configuration-cache --no-build-cache
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        
+          MB_VERSION_NAME_ENV: ${{ steps.mbver.outputs.version_name }}
+          MB_VERSION_CODE_ENV: ${{ steps.mbver.outputs.version_code }}
+        run: gradle make --no-daemon --no-configuration-cache --no-build-cache
 
       - name: Generate plugins.json
         working-directory: src
@@ -73,7 +114,7 @@ jobs:
 
       - name: Patch plugins.json URL and bump version
         env:
-          NEW_VERSION: 188
+          NEW_VERSION: 189
           OUTPUT_BRANCH: ${{ steps.out.outputs.branch }}
         run: python3 src/scripts/patch_plugins.py
 
