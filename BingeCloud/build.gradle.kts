@@ -29,7 +29,7 @@ kotlin {
 }
 
 cloudstream {
-    description = "BingeCloud - TV Series, Movies, Anime"
+    description = "TV Series, Movies, Anime"
     authors = listOf("FlummoxGamer")
     status = 1
     tvTypes = listOf("Movies","TV Series","Anime")
