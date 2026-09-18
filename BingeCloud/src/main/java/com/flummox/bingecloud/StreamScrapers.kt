@@ -90,8 +90,8 @@ fun titleMatches(a: String, b: String): Boolean {
     if (ta.isEmpty() || tb.isEmpty()) return false
     val common = ta.intersect(tb)
     if (common.isEmpty()) return false
-    if (ta.size == 1 || tb.size == 1) {
-        return common.size == minOf(ta.size, tb.size) && common.size == 1
+    if (ta.size == 1) return sb.startsWith(sa)
+    if (tb.size == 1) return sa.startsWith(sb)
     }
     val queryInCandidate = common.size.toFloat() / ta.size
     val candidateInQuery = common.size.toFloat() / tb.size
