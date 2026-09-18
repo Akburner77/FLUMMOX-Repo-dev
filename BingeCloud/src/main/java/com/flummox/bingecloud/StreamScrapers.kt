@@ -30,7 +30,8 @@ data class ScrapedMirror(
     val mirror: String,
     val url: String,
     val source: String,
-    val headers: Map<String, String>? = null
+    val headers: Map<String, String>? = null,
+    val captions: List<Pair<String, String>> = emptyList()
 )
 
 // ═══════════════════════════════════════════
@@ -425,17 +426,18 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
     BCLog.d("MB total: ${allStreams.size} streams / ${languages.size} langs")
 
     allStreams
-        .distinctBy { it.realUrl }
-        .filter { it.durationSec == 0L || it.durationSec >= 120L }
-        .map {
-            ScrapedMirror(
-                quality = it.quality.ifBlank { "Auto" },
-                mirror = prettyAudio(it.audio ?: "MovieBox"),
-                url = it.realUrl,
-                source = "MB",
-                headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
-            )
-        }
+    .distinctBy { it.realUrl }
+    .filter { it.durationSec == 0L || it.durationSec >= 120L }
+    .map {
+        ScrapedMirror(
+            quality = it.quality.ifBlank { "Auto" },
+            mirror = prettyAudio(it.audio ?: "MovieBox"),
+            url = it.realUrl,
+            source = "MB",
+            headers = it.signCookie?.let { c -> mapOf("Cookie" to c) },
+            captions = it.captions
+        )
+    }
 }
 
 private fun prettyAudio(raw: String): String {
