@@ -3,6 +3,7 @@ package com.flummox.bingecloud
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,10 +17,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
-import java.net.URLEncoder
 
 private const val SEP = "|"
 private const val ROW_TAG = "::"
@@ -33,14 +33,24 @@ private const val HOME_GRACE_MS = 5000L
 fun StreamQuery.cacheKey(): String =
     "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
+// ── home content filter: drop daily soaps / talk / reality ──
+private val HOME_BLOCKED_GENRES = setOf(
+    "soap", "talk", "talk show", "reality", "reality tv", "news", "game show"
+)
+
+private fun AioMeta.isJunk(): Boolean {
+    val g = genres ?: return false
+    return g.any { it.lowercase().trim() in HOME_BLOCKED_GENRES }
+}
+
 open class BingeCloudProvider : MainAPI() {
     override var mainUrl = AIOMETA_BASE
     override var name = "BingeCloud"
     override val hasMainPage = true
     override var lang = "en"
     override val hasDownloadSupport = true
+    override val instantLinkLoading = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
-
     override val mainPage = mainPageOf(
         *Settings.getRowOrder()
             .mapNotNull { key ->
@@ -55,51 +65,51 @@ open class BingeCloudProvider : MainAPI() {
 
     // ── home ──
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-    val parts = request.data.split(ROW_TAG)
-    if (parts.size < 2) return null
-    lastHomeRenderMs = System.currentTimeMillis()
-    val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+        val parts = request.data.split(ROW_TAG)
+        if (parts.size < 2) return null
+        lastHomeRenderMs = System.currentTimeMillis()
+        val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+        .filter { !it.isJunk() }
         .mapNotNull { it.toSearchResponse() }
-    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
-
-// ── search ──
-override suspend fun search(query: String): List<SearchResponse>? {
-    val key = BuildConfig.TMDB_API_KEY
-    if (key.isBlank()) {
-        BCLog.e("TMDB key missing — falling back to Aiometa search")
-        return searchViaAiometa(query)
-    }
-    return searchViaTmdb(query, key)
-}
-
-private suspend fun searchViaTmdb(query: String, key: String): List<SearchResponse>? {
-    val out = mutableListOf<SearchResponse>()
-    try {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = "https://api.themoviedb.org/3/search/multi" +
-            "?api_key=$key&language=en-US&query=$encoded&page=1&include_adult=false"
-        val json = app.get(url).text
-        val parsed = tryParseJson<TmdbSearchResponse>(json)
-        parsed?.results?.forEach { item ->
-            item.toSearchResponse()?.let { out.add(it) }
-        }
-    } catch (e: Exception) {
-        BCLog.e("TMDB search failed: ${e.message}")
-    }
-    BCLog.d("TMDB search '$query': ${out.size} results")
-    return out
-}
 
     // ── search ──
-    private suspend fun searchViaAiometa(query: String): List<SearchResponse>? {
-    val results = mutableListOf<SearchResponse>()
-    for (t in listOf("movie", "series", "anime")) {
-        try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
-        catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
+    override suspend fun search(query: String): List<SearchResponse>? {
+        val key = BuildConfig.TMDB_API_KEY
+        if (key.isBlank()) {
+            BCLog.e("TMDB key missing — falling back to Aiometa search")
+            return searchViaAiometa(query)
+        }
+        return searchViaTmdb(query, key)
     }
-    return results
-}
+
+    private suspend fun searchViaTmdb(query: String, key: String): List<SearchResponse>? {
+        val out = mutableListOf<SearchResponse>()
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://api.themoviedb.org/3/search/multi" +
+                "?api_key=$key&language=en-US&query=$encoded&page=1&include_adult=false"
+            val json = app.get(url).text
+            val parsed = tryParseJson<TmdbSearchResponse>(json)
+            parsed?.results?.forEach { item ->
+                item.toSearchResponse()?.let { out.add(it) }
+            }
+        } catch (e: Exception) {
+            BCLog.e("TMDB search failed: ${e.message}")
+        }
+        BCLog.d("TMDB search '$query': ${out.size} results")
+        return out
+    }
+
+    private suspend fun searchViaAiometa(query: String): List<SearchResponse>? {
+        val results = mutableListOf<SearchResponse>()
+        for (t in listOf("movie", "series", "anime")) {
+            try { results.addAll(aioSearch(query, t).mapNotNull { it.toSearchResponse() }) }
+            catch (e: Exception) { BCLog.e("Search $t failed: ${e.message}") }
+        }
+        return results
+    }
 
     private fun AioMeta.toSearchResponse(): SearchResponse? {
         val metaId = this.id ?: return null
@@ -116,30 +126,27 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
             this.year = yearInt
         }
     }
+
     private fun TmdbSearchItem.toSearchResponse(): SearchResponse? {
-    val id = this.id ?: return null
-    val mt = this.media_type ?: return null
-    if (mt != "movie" && mt != "tv") return null
-
-    val title = this.title ?: this.name ?: return null
-    val isAnime = mt == "tv"
-        && original_language == "ja"
-        && (genre_ids?.contains(16) == true)   // 16 = Animation
-
-    val tvType = when {
-        mt == "movie" -> TvType.Movie
-        isAnime -> TvType.Anime
-        else -> TvType.TvSeries
-    }
-
-    val loadType = if (mt == "movie") "movie" else "series"
-    val metaId = "tmdb:$id"
-    val year = (release_date ?: first_air_date)?.take(4)?.toIntOrNull()
-
-    return newMovieSearchResponse(title, "/$loadType$SEP$metaId", tvType) {
-        this.posterUrl = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" }
-        this.year = year
-    }
+        val id = this.id ?: return null
+        val mt = this.media_type ?: return null
+        if (mt != "movie" && mt != "tv") return null
+        val title = this.title ?: this.name ?: return null
+        val isAnime = mt == "tv" &&
+            original_language == "ja" &&
+            (genre_ids?.contains(16) == true)
+        val tvType = when {
+            mt == "movie" -> TvType.Movie
+            isAnime -> TvType.Anime
+            else -> TvType.TvSeries
+        }
+        val loadType = if (mt == "movie") "movie" else "series"
+        val metaId = "tmdb:$id"
+        val year = (release_date ?: first_air_date)?.take(4)?.toIntOrNull()
+        return newMovieSearchResponse(title, "/$loadType$SEP$metaId", tvType) {
+            this.posterUrl = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" }
+            this.year = year
+        }
     }
 
     // ── load ──
@@ -167,13 +174,12 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
         val plot = if (statusTag.isNotBlank() && desc.isNotBlank()) "<b>$statusTag</b><br><br>$desc"
             else if (statusTag.isNotBlank()) "<b>$statusTag</b>" else desc
 
-        // ── prefetch: skip if triggered by home banner render ──
-            val sinceHome = System.currentTimeMillis() - lastHomeRenderMs
-            val fromHomeBanner = sinceHome in 0 until HOME_GRACE_MS
-            if (fromHomeBanner) {
-               BCLog.d("load() preview (no prefetch): ${name.take(40)} [${sinceHome}ms since home]")
-            }
-            if (Settings.isPrefetchEnabled() && !fromHomeBanner) {
+        val sinceHome = System.currentTimeMillis() - lastHomeRenderMs
+        val fromHomeBanner = sinceHome in 0 until HOME_GRACE_MS
+        if (fromHomeBanner) {
+            BCLog.d("load() preview (no prefetch): ${name.take(40)} [${sinceHome}ms since home]")
+        }
+        if (Settings.isPrefetchEnabled() && !fromHomeBanner) {
             val prefetchQuery: StreamQuery? = when {
                 tvType == TvType.Movie && videos.isEmpty() ->
                     StreamQuery(name, yearInt?.toString() ?: "", "movie", meta.imdb_id ?: "")
@@ -253,70 +259,91 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
 
     // ── loadLinks ──
     override suspend fun loadLinks(
-        data: String, isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val query = decodeQuery(data) ?: return false
-        BCLog.section("loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
+    data: String, isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val query = decodeQuery(data) ?: return false
+    BCLog.section("loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
 
-        val cached = BCCache.getMirrors(query.cacheKey())
-        val mirrors = cached ?: scrapeAllSources(query)
-        if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
-        if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
+    val cached = BCCache.getMirrors(query.cacheKey())
+    val mirrors = cached ?: scrapeAllSources(query)
+    if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
+    if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
 
-        // ── 1. sort: smart (by score + emoji) or raw (source order) ──
-        val smartSort = Settings.isPrefilterEnabled()
-        val pref = Settings.getQualityPref()
-        val prefRank = qualityRank(pref)
+    val smartSort = Settings.isPrefilterEnabled()
+    val pref = Settings.getQualityPref()
+    val prefRank = qualityRank(pref)
 
-        val finalOrder: List<Pair<ScrapedMirror, Int>> = if (smartSort) {
-            mirrors
-                .map { it to LinkScore.prelimScore(it) }
-                .sortedWith(
-                    compareByDescending<Pair<ScrapedMirror, Int>> {
-                        if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
-                    }
-                        .thenByDescending { it.second }
-                        .thenByDescending { qualityRank(it.first.quality) }
-                        .thenBy { audioPriority(it.first.mirror, it.first.source) }
-                )
-        } else {
-            mirrors
-                .map { it to 0 }
-                .sortedWith(
-                    compareByDescending<Pair<ScrapedMirror, Int>> {
-                        if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
-                    }
-                        .thenByDescending { qualityRank(it.first.quality) }
-                )
-        }
+    val finalOrder: List<Pair<ScrapedMirror, Int>> = if (smartSort) {
+        mirrors
+            .map { it to LinkScore.prelimScore(it) }
+            .sortedWith(
+                compareByDescending<Pair<ScrapedMirror, Int>> {
+                    if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+                }
+                    .thenByDescending { it.second }
+                    .thenByDescending { qualityRank(it.first.quality) }
+                    .thenBy { audioPriority(it.first.mirror, it.first.source) }
+            )
+    } else {
+        mirrors
+            .map { it to 0 }
+            .sortedWith(
+                compareByDescending<Pair<ScrapedMirror, Int>> {
+                    if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+                }
+                    .thenByDescending { qualityRank(it.first.quality) }
+            )
+    }
 
-        val concurrency = Settings.getConcurrency().coerceIn(1, 50)
-        BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency, smart=$smartSort)")
+    val concurrency = Settings.getConcurrency().coerceIn(1, 50)
+    BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency, smart=$smartSort, streaming=true)")
 
-        val sem = Semaphore(concurrency)
+    val sem = Semaphore(concurrency)
+    val hostSems = ConcurrentHashMap<String, Semaphore>()
+    fun hostSem(host: String): Semaphore = hostSems.getOrPut(host) { Semaphore(5) }
+    val emittedCount = java.util.concurrent.atomic.AtomicInteger(0)
 
-        // ── per-host concurrency cap (prevents rate limiting) ──
-        val hostSems = ConcurrentHashMap<String, Semaphore>()
-        fun hostSem(host: String): Semaphore =
-            hostSems.getOrPut(host) { Semaphore(5) }
-
-        val perMirror: List<List<ExtractorLink>> = coroutineScope {
-            finalOrder.map { (m, score) ->
-                async {
-                    sem.withPermit {
-                        val host = hostOf(m.url).ifBlank { "unknown" }
-                        hostSem(host).withPermit {
-                            try {
-                                val emoji = if (smartSort) LinkScore.emoji(score) else ""
-                                if (m.source == "GOGO") {
-                                val bag = mutableListOf<ExtractorLink>()
-                                    GogoCdn().getUrl(m.url, "", subtitleCallback) { bag.add(it) }
-                                if (bag.isEmpty()) HostHealth.recordFailure(host)
-                                else HostHealth.recordSuccess(host)
-                                bag
-                                } else if (m.source == "MB") {
+    coroutineScope {
+        finalOrder.forEach { (m, score) ->
+            launch {
+                sem.withPermit {
+                    val host = hostOf(m.url).ifBlank { "unknown" }
+                    hostSem(host).withPermit {
+                        val emoji = if (smartSort) LinkScore.emoji(score) else ""
+                        try {
+                            when (m.source) {
+                                "ANIKOTO" -> {
+                                    var emitted = 0
+                                    val hashM3u8 = anikotoGetHashM3u8(m.url)
+                                    if (hashM3u8 != null) {
+                                        callback.invoke(newExtractorLink("AniKoto", "$emoji${m.mirror}", hashM3u8, ExtractorLinkType.M3U8) {
+                                            this.referer = "https://anikototv.to/"
+                                        })
+                                        emitted++
+                                    } else {
+                                        val domain = hostOf(m.url)
+                                        val domainHost = "https://$domain"
+                                        val isMegaFam = domain.contains("megaplay", true) ||
+                                                domain.contains("vidwish", true) ||
+                                                domain.contains("vidtube", true)
+                                        if (isMegaFam) {
+                                            try {
+                                                anikotoExtractMegaPlayUrl(m.url, "https://anikototv.to/", domainHost, "$emoji${m.mirror}", subtitleCallback) { l -> callback.invoke(l); emitted++ }
+                                            } catch (e: Exception) { BCLog.e("AniKoto resolve: ${e.message}") }
+                                        } else {
+                                            try { loadExtractor(m.url, "https://anikototv.to/", subtitleCallback) { l -> callback.invoke(l); emitted++ } } catch (_: Exception) {}
+                                        }
+                                    }
+                                    if (emitted == 0) {
+                                        HostHealth.recordFailure(host)
+                                    } else {
+                                        HostHealth.recordSuccess(host)
+                                        emittedCount.addAndGet(emitted)
+                                    }
+                                }
+                                "MB" -> {
                                     val linkType = when {
                                         m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
                                         m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
@@ -329,64 +356,68 @@ private suspend fun searchViaTmdb(query: String, key: String): List<SearchRespon
                                         this.referer = "https://h5.aoneroom.com/"
                                         if (hdrs != null) this.headers = hdrs
                                     }
+                                    callback.invoke(link)
+                                    emittedCount.incrementAndGet()
                                     HostHealth.recordSuccess("mb.local")
-                                    listOf(link)
-                                } else {
+                                }
+                                else -> {
                                     val finalUrl = resolveWrapper(m.url)
                                     if (finalUrl == null) {
                                         BCLog.d("unresolved: ${m.mirror}")
                                         HostHealth.recordFailure(host)
-                                        emptyList()
                                     } else {
-                                        val bag = mutableListOf<ExtractorLink>()
+                                        var emitted = 0
                                         VCloud(m.source, m.mirror, m.quality, emoji)
-                                            .getUrl(finalUrl, "", subtitleCallback) { bag.add(it) }
-                                        if (bag.isEmpty()) HostHealth.recordFailure(host)
-                                        else HostHealth.recordSuccess(host)
-                                        bag
+                                            .getUrl(finalUrl, "", subtitleCallback) { l -> callback.invoke(l); emitted++ }
+                                        if (emitted == 0) {
+                                            HostHealth.recordFailure(host)
+                                        } else {
+                                            HostHealth.recordSuccess(host)
+                                            emittedCount.addAndGet(emitted)
+                                        }
                                     }
                                 }
-                            } catch (e: Exception) {
-                                BCLog.e("${m.mirror} failed: ${e.message}")
-                                HostHealth.recordFailure(host)
-                                emptyList()
                             }
+                        } catch (e: Exception) {
+                            BCLog.e("${m.mirror} failed: ${e.message}")
+                            HostHealth.recordFailure(host)
                         }
-                    }
-                }
-            }.awaitAll()
-        }
-
-        perMirror.flatten().forEach { callback.invoke(it) }
-        BCLog.d("loadLinks done (${perMirror.flatten().size} links)")
-
-        // ── 4. prefetch next episode ──
-        if (Settings.isPrefetchEnabled() && query.type == "series"
-            && query.nextSeason > 0 && query.nextEpisode > 0) {
-            val nextQ = StreamQuery(
-                query.title, query.year, "series", query.imdbId,
-                query.nextSeason, query.nextEpisode
-            )
-            val nextKey = nextQ.cacheKey()
-            if (BCCache.getMirrors(nextKey) == null) {
-                activePrefetchJob?.cancel()
-                activePrefetchJob = PREFETCH_SCOPE.launch {
-                    try {
-                        BCLog.d("smart prefetch next: S${query.nextSeason}E${query.nextEpisode}")
-                        val nextMirrors = scrapeAllSources(nextQ)
-                        BCCache.putMirrors(nextKey, nextMirrors)
-                        BCLog.d("smart prefetch next done: ${nextMirrors.size} mirrors")
-                    } catch (e: CancellationException) {
-                        BCLog.d("smart prefetch next cancelled")
-                    } catch (e: Exception) {
-                        BCLog.e("smart prefetch next failed: ${e.message}")
                     }
                 }
             }
         }
-        return true
     }
 
+    BCLog.d("loadLinks done (${emittedCount.get()} links, streamed)")
+
+    if (Settings.isPrefetchEnabled() && query.type == "series"
+        && query.nextSeason > 0 && query.nextEpisode > 0) {
+        val nextQ = StreamQuery(
+            query.title, query.year, "series", query.imdbId,
+            query.nextSeason, query.nextEpisode
+        )
+        val nextKey = nextQ.cacheKey()
+        if (BCCache.getMirrors(nextKey) == null) {
+            activePrefetchJob?.cancel()
+            activePrefetchJob = PREFETCH_SCOPE.launch {
+                try {
+                    BCLog.d("smart prefetch next: S${query.nextSeason}E${query.nextEpisode}")
+                    val nextMirrors = scrapeAllSources(nextQ)
+                    BCCache.putMirrors(nextKey, nextMirrors)
+                    BCLog.d("smart prefetch next done: ${nextMirrors.size} mirrors")
+                } catch (e: CancellationException) {
+                    BCLog.d("smart prefetch next cancelled")
+                } catch (e: Exception) {
+                    BCLog.e("smart prefetch next failed: ${e.message}")
+                }
+            }
+        }
+    }
+    return true
+    }
+
+    
+    
     private fun hostOf(url: String): String = try {
         java.net.URI(url).host ?: ""
     } catch (_: Exception) { "" }
@@ -446,10 +477,7 @@ private fun decodeQuery(s: String): StreamQuery? = try {
     )
 } catch (e: Exception) { null }
 
-
-// ── TMDB search DTOs ──
 private data class TmdbSearchResponse(val results: List<TmdbSearchItem>? = null)
-
 private data class TmdbSearchItem(
     val id: Int? = null,
     val media_type: String? = null,

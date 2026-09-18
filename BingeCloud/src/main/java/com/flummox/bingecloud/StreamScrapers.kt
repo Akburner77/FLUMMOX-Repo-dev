@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
@@ -60,9 +61,6 @@ private suspend fun resolveDomain(key: String, fallback: String): String {
 // ═══════════════════════════════════════════
 // ── TITLE MATCHING ──
 // ═══════════════════════════════════════════
-private fun normalize(s: String): String =
-    s.lowercase().replace(Regex("""[^a-z0-9]+"""), " ").trim()
-
 private val STOP_WORDS = setOf(
     "download", "the", "a", "an", "of", "and", "or", "in", "on", "at", "to",
     "full", "movie", "series", "episode", "episodes", "season", "complete",
@@ -86,18 +84,14 @@ fun titleMatches(a: String, b: String): Boolean {
     val sb = stripQualifiers(b)
     if (sa.isEmpty() || sb.isEmpty()) return false
     if (sa == sb) return true
-
     val ta = sa.split(" ").filter { it.isNotBlank() }.toSet()
     val tb = sb.split(" ").filter { it.isNotBlank() }.toSet()
     if (ta.isEmpty() || tb.isEmpty()) return false
-
     val common = ta.intersect(tb)
     if (common.isEmpty()) return false
-
     if (ta.size == 1 || tb.size == 1) {
         return common.size == minOf(ta.size, tb.size) && common.size == 1
     }
-
     val queryInCandidate = common.size.toFloat() / ta.size
     val candidateInQuery = common.size.toFloat() / tb.size
     return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
@@ -315,14 +309,14 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
                 }
                 if (allH5[j].text().contains(Regex("""EP\s*0*\d+""", RegexOption.IGNORE_CASE))) break
             }
-        } else {
-            for (a in h.select("a[href]")) {
+                } else if (targetEp <= 0) {
+                for (a in h.select("a[href]")) {
                 val href = a.attr("href"); val label = a.text().lowercase()
                 when {
-                    href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HCloud", href, "MD"))
-                    href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
-                }
-            }
+                href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HCloud", href, "MD"))
+                href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
+             }
+           }
         }
     }
     return out
@@ -413,17 +407,17 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
     BCLog.d("MB total: ${allStreams.size} streams / ${languages.size} langs")
 
     allStreams
-    .distinctBy { it.realUrl }
-    .filter { it.durationSec == 0L || it.durationSec >= 120L }
-    .map {
-        ScrapedMirror(
-            quality = it.quality.ifBlank { "Auto" },
-            mirror = prettyAudio(it.audio ?: "MovieBox"),
-            url = it.realUrl,
-            source = "MB",
-            headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
-        )
-    }
+        .distinctBy { it.realUrl }
+        .filter { it.durationSec == 0L || it.durationSec >= 120L }
+        .map {
+            ScrapedMirror(
+                quality = it.quality.ifBlank { "Auto" },
+                mirror = prettyAudio(it.audio ?: "MovieBox"),
+                url = it.realUrl,
+                source = "MB",
+                headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
+            )
+        }
 }
 
 private fun prettyAudio(raw: String): String {
@@ -441,6 +435,200 @@ private fun prettyAudio(raw: String): String {
         l.contains("bengali") -> "Bengali"
         else -> raw.replace(Regex("""(?i)\s*\(?\s*(dub|audio)\s*\)?"""), " ").trim().ifBlank { "Auto" }
     }
+}
+
+// ═══════════════════════════════════════════
+// ── AniKoto ──
+// ═══════════════════════════════════════════
+private const val ANIKOTO_DOMAIN = "https://anikototv.to"
+private const val ANIKOTO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
+private val anikotoBrowserHeaders = mapOf(
+    "User-Agent" to ANIKOTO_UA,
+    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language" to "en-US,en;q=0.5"
+)
+
+private fun anikotoAjaxHeaders(referer: String): Map<String, String> = mapOf(
+    "User-Agent" to ANIKOTO_UA,
+    "X-Requested-With" to "XMLHttpRequest",
+    "Accept" to "application/json, text/javascript, */*; q=0.01",
+    "Referer" to referer
+)
+
+private fun anikotoResultString(json: String): String = try {
+    val root = JSONObject(json)
+    if (root.optInt("status") == 200) root.optString("result") else ""
+} catch (_: Exception) { "" }
+
+private fun anikotoResultUrl(json: String): String? = try {
+    val root = JSONObject(json)
+    if (root.optInt("status") == 200)
+        root.optJSONObject("result")?.optString("url")?.takeIf { it.isNotBlank() }
+    else null
+} catch (_: Exception) { null }
+
+private fun anikotoScore(query: String, candidate: String): Int {
+    val q = query.lowercase().trim()
+    val c = candidate.lowercase().trim()
+    if (q.isEmpty() || c.isEmpty()) return 0
+    if (q == c) return 100
+    if (c.startsWith(q)) return 30
+    if (q.startsWith(c)) return 25
+    val qw = q.split(Regex("\\s+")).filter { it.isNotBlank() }
+    val cw = c.split(Regex("\\s+")).filter { it.isNotBlank() }
+    if (qw.size <= 2) {
+        return if (cw.take(qw.size).joinToString(" ") == q) 20 else 0
+    }
+    val common = qw.intersect(cw.toSet()).size
+    if (common == 0) return 0
+    val ratio = common.toFloat() / maxOf(qw.size, cw.size)
+    return (ratio * 20).toInt()
+}
+
+private data class AnikotoSeries(val url: String, val title: String, val animeId: String, val slug: String)
+
+private suspend fun anikotoFindSeries(title: String): AnikotoSeries? {
+    val query = URLEncoder.encode(title, "UTF-8")
+    val doc = try {
+        app.get("$ANIKOTO_DOMAIN/filter?keyword=$query", headers = anikotoBrowserHeaders).document
+    } catch (e: Exception) {
+        BCLog.e("AniKoto search failed: ${e.message}"); return null
+    }
+    val cards = doc.select("div.ani.items > div.item")
+    if (cards.isEmpty()) { BCLog.d("AniKoto: 0 cards"); return null }
+
+    var best: AnikotoSeries? = null
+    var bestScore = 0
+    for (card in cards) {
+        val titleEl = card.selectFirst("a.name.d-title")
+            ?: card.selectFirst("a[title]")
+            ?: card.selectFirst("a[href*='/watch/']") ?: continue
+        var href = titleEl.attr("href")
+        if (href.isBlank()) href = card.selectFirst("div.poster a, a")?.attr("href") ?: ""
+        val candTitle = titleEl.text().trim().ifBlank { titleEl.attr("title").trim() }
+        if (href.isBlank() || candTitle.isBlank()) continue
+        val score = anikotoScore(title, candTitle)
+        if (score > bestScore && score >= 20) {
+        bestScore = score
+            val full = if (href.startsWith("http")) href else "$ANIKOTO_DOMAIN$href"
+            // strip trailing /ep-N to get the SERIES page URL, not the episode page
+            val seriesUrl = full.replace(Regex("""/ep-\d+/?$"""), "").trimEnd('/')
+            val slug = seriesUrl.substringAfterLast("/")
+            best = AnikotoSeries(seriesUrl, candTitle, "", slug)
+        }
+    }
+    if (best == null) { BCLog.d("AniKoto: no match"); return null }
+
+    val seriesHtml = try {
+        app.get(best.url, headers = anikotoBrowserHeaders).text
+    } catch (_: Exception) { "" }
+    val seriesDoc = Jsoup.parse(seriesHtml, best.url)
+    val animeId = seriesDoc.selectFirst("#watch-main")?.attr("data-id")?.takeIf { it.isNotBlank() }
+        ?: seriesDoc.selectFirst("[data-id]")?.attr("data-id")?.takeIf { it.isNotBlank() }
+        ?: Regex("""data-id=["'](\d+)["']""").find(seriesHtml)?.groupValues?.get(1)
+        ?: ""
+    best = best.copy(animeId = animeId)
+    BCLog.d("AniKoto matched '${best.title}' (score=$bestScore, animeId=$animeId, slug=${best.slug})")
+    return best
+}
+
+private suspend fun anikotoGetServerIds(series: AnikotoSeries, episode: Int): String? {
+    if (series.animeId.isBlank()) return null
+    val listJson = try {
+        anikotoResultString(app.get("$ANIKOTO_DOMAIN/ajax/episode/list/${series.animeId}", headers = anikotoAjaxHeaders(series.url)).text)
+    } catch (e: Exception) {
+        BCLog.e("AniKoto ep list failed: ${e.message}"); return null
+    }
+    if (listJson.isBlank()) return null
+    val listDoc = Jsoup.parse(listJson)
+    val allEp = listDoc.select("a[data-ids]")
+    if (allEp.isEmpty()) return null
+    val epEl = allEp.firstOrNull { it.attr("data-num").toIntOrNull() == episode }
+        ?: allEp.firstOrNull() ?: return null
+    return epEl.attr("data-ids").takeIf { it.isNotBlank() }
+}
+
+private suspend fun anikotoResolvePlayerUrl(linkId: String, referer: String): String? {
+    val encoded = android.net.Uri.encode(linkId)
+    val endpoints = listOf(
+    "$ANIKOTO_DOMAIN/ajax/server?get=$encoded"
+    )
+    for (ep in endpoints) {
+        try {
+            val raw = app.get(ep, headers = anikotoAjaxHeaders(referer)).text
+            if (raw.contains("\"message\"")) continue
+            val viaResult = anikotoResultUrl(raw)
+            if (viaResult != null) {
+            BCLog.v("AniKoto OK via $ep")
+            return viaResult
+            }
+            try {
+                val obj = JSONObject(raw)
+                obj.optString("url").takeIf { it.isNotBlank() }?.let { return it }
+                obj.optJSONObject("data")?.optString("url")?.takeIf { it.isNotBlank() }?.let { return it }
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+    for (body in listOf("id=$encoded", "linkId=$encoded", "server=$encoded")) {
+        try {
+            val raw = app.post(
+                "$ANIKOTO_DOMAIN/ajax/server",
+                headers = anikotoAjaxHeaders(referer).toMutableMap().apply { put("Content-Type", "application/x-www-form-urlencoded") },
+                requestBody = okhttp3.RequestBody.create("application/x-www-form-urlencoded".toMediaTypeOrNull(), body)
+            ).text
+            if (raw.contains("\"message\"")) continue
+            val viaResult = anikotoResultUrl(raw)
+            if (viaResult != null) return viaResult
+        } catch (_: Exception) {}
+    }
+    return null
+}
+
+private suspend fun anikotoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
+    val series = anikotoFindSeries(q.title) ?: return emptyList()
+    val serverIds = anikotoGetServerIds(series, q.episode) ?: run {
+        BCLog.d("AniKoto: no serverIds"); return emptyList()
+    }
+    val listJson = try {
+        anikotoResultString(app.get("$ANIKOTO_DOMAIN/ajax/server/list?servers=${android.net.Uri.encode(serverIds)}", headers = anikotoAjaxHeaders(series.url)).text)
+    } catch (e: Exception) {
+        BCLog.e("AniKoto server list failed: ${e.message}"); return emptyList()
+    }
+    if (listJson.isBlank()) return emptyList()
+
+    BCLog.v("AniKoto server list HTML: ${listJson.replace('\n',' ')}")
+
+    val doc = Jsoup.parse(listJson)
+    val entries = mutableListOf<Pair<String, String>>()
+    for (block in doc.select("div.type")) {
+        val sType = block.attr("data-type").ifBlank { "sub" }
+        for (li in block.select("li")) {
+            val linkId = listOf("data-link-id", "data-id", "data-sv", "data-server", "data-embed")
+                .firstNotNullOfOrNull { li.attr(it).takeIf { v -> v.isNotBlank() } }
+                ?: continue
+            val name = li.text().trim().ifBlank { "Server" }
+            entries.add(linkId to "AniKoto ${anikotoServerTypeLabel(sType)} $name")
+        }
+    }
+    BCLog.d("AniKoto: ${entries.size} servers")
+    if (entries.isEmpty()) return emptyList()
+
+    val mirrors = coroutineScope {
+        entries.map { (linkId, label) ->
+            async {
+                val playerUrl = anikotoResolvePlayerUrl(linkId, series.url) ?: return@async null
+                val full = when {
+                    playerUrl.startsWith("//") -> "https:$playerUrl"
+                    playerUrl.startsWith("/") -> "$ANIKOTO_DOMAIN$playerUrl"
+                    else -> playerUrl
+                }
+                ScrapedMirror("Auto", label, full, "ANIKOTO")
+            }
+        }.awaitAll().filterNotNull()
+    }
+    BCLog.d("AniKoto: ${mirrors.size} mirrors")
+    return mirrors
 }
 
 // ═══════════════════════════════════════════
@@ -500,15 +688,20 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                 } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
             } ?: run { BCLog.d("HDH timeout"); emptyList() }
         })
-        if (Settings.isSrcGogo()) jobs.add(async {
-            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
-                try { gogoExtractRaw(q) } catch (e: Exception) { BCLog.e("Gogo task failed: ${e.message}"); emptyList() }
-            } ?: run { BCLog.d("Gogo timeout"); emptyList() }
-        })
+        
         if (Settings.isSrcMovieBox()) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
                 try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
             } ?: run { BCLog.d("MB timeout"); emptyList() }
+        })
+        if (Settings.isSrcAnikoto()) jobs.add(async {
+            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+                try {
+                    com.flummox.bingecore.SpeedBooster.deduped("anikoto:${q.cacheKey()}") {
+                        anikotoExtractRaw(q)
+                    }
+                } catch (e: Exception) { BCLog.e("AniKoto task failed: ${e.message}"); emptyList() }
+            } ?: run { BCLog.d("AniKoto timeout"); emptyList() }
         })
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
@@ -517,8 +710,8 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         val md = all.count { it.source == "MD" }
         val hdh = all.count { it.source == "HDH" }
         val mb = all.count { it.source == "MB" }
-        val gogo = all.count { it.source == "GOGO" }
-        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb GOGO=$gogo total=${all.size}")
+        val ak = all.count { it.source == "ANIKOTO" }
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb ANIKOTO=$ak total=${all.size}")
         all
     }
 }

@@ -63,7 +63,7 @@ object Settings {
     const val K_SRC_HDH = "bingecloud_src_hdh"
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
     const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
-    const val K_SRC_GOGO = "bingecloud_src_gogo"
+    const val K_SRC_ANIKOTO = "bingecloud_src_anikoto"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
     const val K_PREFETCH = "bingecloud_prefetch"
@@ -91,6 +91,7 @@ object Settings {
     const val K_ROW_HINDI_MOVIES = "bingecloud_row_hindi_movies"
     const val K_ROW_HINDI_SERIES = "bingecloud_row_hindi_series"
     const val K_ROW_ANIME_SCHEDULE = "bingecloud_row_anime_schedule"
+    const val K_VERBOSE_LOG = "bingecloud_verbose_log"
 
     val DEFAULT_CF_DOMAINS = emptyList<String>()
 
@@ -158,6 +159,7 @@ object Settings {
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
     fun isPrefetchEnabled(): Boolean = getKey<Boolean>(K_PREFETCH) ?: true
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
+    fun isVerboseLog(): Boolean = getKey<Boolean>(K_VERBOSE_LOG) ?: false
 
     // ── CF cookies ──
     fun getCfDomains(): List<String> =
@@ -194,8 +196,7 @@ object Settings {
     fun isSrcHdh(): Boolean = getKey<Boolean>(K_SRC_HDH) ?: true
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
-    fun isSrcGogo(): Boolean = getKey<Boolean>(K_SRC_GOGO) ?: true
-
+    fun isSrcAnikoto(): Boolean = getKey<Boolean>(K_SRC_ANIKOTO) ?: true
     // ══════════════════════════════════════════════════════════
     // ── COLORS ──
     // ══════════════════════════════════════════════════════════
@@ -800,16 +801,16 @@ object Settings {
 
         // ── SOURCES ──
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcGogo()).count { it }
+            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcAnikoto()).count { it }
             val c = buildCard(
-                ctx, "📡", "Sources", "$on of 5 enabled",
-                badge = "$on/5"
+            ctx, "📡", "Sources", "$on of 5 enabled",
+            badge = "$on/5"
             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
             c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
-            c.body.addView(toggleRow(ctx, "GogoAnime", "Anime only", isSrcGogo()) { setKey(K_SRC_GOGO, it) })
+            c.body.addView(toggleRow(ctx, "AniKoto", "Anime only — sub/dub", isSrcAnikoto()) { setKey(K_SRC_ANIKOTO, it) })
             body.addView(c.root)
         }
 
@@ -851,10 +852,18 @@ object Settings {
 
         // ── DEBUG LOGS ──
         run {
-            val c = buildCard(
+             val c = buildCard(
                 ctx, "🐞", "Debug Logs",
-                "Local · ${BCLog.count()} lines • tap ▸ to expand"
-            )
+               "Local · ${BCLog.count()} lines • tap ▸ to expand"
+             )
+               c.body.addView(toggleRow(
+               ctx, "Verbose logging",
+              "Log full URLs, HTML dumps, tokens — off for normal use",
+              isVerboseLog()
+              ) { enabled ->
+              setKey(K_VERBOSE_LOG, enabled)
+              BCLog.setVerbose(enabled)
+            })
             val logView = TextView(ctx).apply {
                 typeface = Typeface.MONOSPACE
                 textSize = 10f
