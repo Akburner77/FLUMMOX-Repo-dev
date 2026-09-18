@@ -304,9 +304,11 @@ val out = mutableListOf<MBStream>()
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
         val resolutionsStr = o.optString("resolutions").ifBlank { null }
-        val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
-            if (it.toIntOrNull() != null) "${it}p" else it
-        } ?: o.optString("quality").ifBlank { "Auto" }
+        val quality = resolutionsStr?.split(",")
+           ?.mapNotNull { it.trim().removeSuffix("p").removeSuffix("P").toIntOrNull() }
+           ?.maxOrNull()
+           ?.let { "${it}p" }
+           ?: o.optString("quality").ifBlank { "Auto" }
 
         var dur = o.optLong("duration", 0L)
         if (dur <= 0) dur = o.optLong("durationSeconds", 0L)
