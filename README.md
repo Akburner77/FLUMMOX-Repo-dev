@@ -35,8 +35,9 @@ Your all-in-one streaming companion — built for speed, reliability, and a clea
 
 - 🎥 **Movies & Tv Shows** — Blockbusters, classics, and everything in between. Stream with multiple quality
 - 🌸 **Anime** — Japanese and Asian animation, all in one place.
-- 🔍 **Instant Search** — Find any movie, series, or anime in seconds.
-- ⚡ **Fast Loads** — All available streams are fetched simultaneously and shown in a single clean list.
+- 🎯 **Smart Link Ranking** — Mirrors are scored by URL type, source reliability, and live host reputation, then color-coded 🟢🟡🔴 for instant quality assessment. Unique to BingeCloud.
+- ❤️ **Host Health Memory** — Host reliability is tracked across sessions; failing hosts are demoted and recover automatically on success. Unique to BingeCloud.
+- ⚡ **Instant Search & Fast Loads** — Find any title in seconds, with all available streams fetched simultaneously in a single clean list.
 
 ---
 
