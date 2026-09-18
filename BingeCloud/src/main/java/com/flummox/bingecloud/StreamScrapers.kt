@@ -688,11 +688,7 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
                 } catch (e: Exception) { BCLog.e("HDH task failed: ${e.message}"); emptyList() }
             } ?: run { BCLog.d("HDH timeout"); emptyList() }
         })
-        if (Settings.isSrcGogo()) jobs.add(async {
-            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
-                try { gogoExtractRaw(q) } catch (e: Exception) { BCLog.e("Gogo task failed: ${e.message}"); emptyList() }
-            } ?: run { BCLog.d("Gogo timeout"); emptyList() }
-        })
+        
         if (Settings.isSrcMovieBox()) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
                 try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
@@ -714,9 +710,8 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         val md = all.count { it.source == "MD" }
         val hdh = all.count { it.source == "HDH" }
         val mb = all.count { it.source == "MB" }
-        val gogo = all.count { it.source == "GOGO" }
         val ak = all.count { it.source == "ANIKOTO" }
-        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb GOGO=$gogo ANIKOTO=$ak total=${all.size}")
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb ANIKOTO=$ak total=${all.size}")
         all
     }
 }
