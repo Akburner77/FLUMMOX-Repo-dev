@@ -19,6 +19,14 @@ object BCLog {
     private val lock = Any()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
     private var writer: BufferedWriter? = null
+    private var verbose: Boolean = false
+    private var pendingWrites: Int = 0
+
+    fun setVerbose(enabled: Boolean) {
+        synchronized(lock) { verbose = enabled }
+    }
+ 
+    fun isVerbose(): Boolean = synchronized(lock) { verbose }
 
     private val RX_JWT = Regex("""eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+""")
     private val RX_BEARER = Regex("""(?i)(bearer\s+)\S+""")
@@ -57,21 +65,26 @@ object BCLog {
     }
 
     private fun writeLine(line: String, level: Char) {
-        synchronized(lock) {
-            buffer.addLast(line)
-            while (buffer.size > MAX_LINES) buffer.removeFirst()
-            try {
-                writer?.appendLine(line)
+    synchronized(lock) {
+        buffer.addLast(line)
+        while (buffer.size > MAX_LINES) buffer.removeFirst()
+        try {
+            writer?.appendLine(line)
+            pendingWrites++
+            if (pendingWrites >= 30) {
                 writer?.flush()
-            } catch (_: Exception) {}
-        }
-        when (level) {
-            'e' -> Log.e(TAG, line)
-            else -> Log.d(TAG, line)
-        }
+                pendingWrites = 0
+            }
+        } catch (_: Exception) {}
+      }
     }
 
     fun d(message: String) {
+        writeLine("[${timeFormat.format(Date())}] $message", 'd')
+    }
+ 
+    fun v(message: String) {
+    if (!isVerbose()) return
         writeLine("[${timeFormat.format(Date())}] $message", 'd')
     }
 
