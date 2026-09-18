@@ -678,8 +678,9 @@ suspend fun resolveWrapper(url: String, depth: Int = 0): String? {
                 val normalized = b64.replace('-', '+').replace('_', '/')
                 val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
                 val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT)).trim()
-                if (decoded.contains("r2.dev", ignoreCase = true)) {
-                    BCLog.d("resolveWrapper skip r2.dev (unplayable): ${decoded.take(80)}")
+                if (decoded.contains("r2.dev", ignoreCase = true) ||
+                    decoded.contains("video-downloads.googleusercontent.com", ignoreCase = true)) {
+                    BCLog.d("resolveWrapper skip unplayable gateway: ${decoded.take(80)}")
                     return null
                 }
                 if (decoded.startsWith("http")) {
