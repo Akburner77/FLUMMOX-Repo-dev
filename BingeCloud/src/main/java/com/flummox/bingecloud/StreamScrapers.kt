@@ -90,12 +90,11 @@ fun titleMatches(a: String, b: String): Boolean {
     if (ta.isEmpty() || tb.isEmpty()) return false
     val common = ta.intersect(tb)
     if (common.isEmpty()) return false
-    if (ta.size == 1) return sb.startsWith(sa)
-    if (tb.size == 1) return sa.startsWith(sb)
-    }
-    val queryInCandidate = common.size.toFloat() / ta.size
-    val candidateInQuery = common.size.toFloat() / tb.size
-    return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
+            if (ta.size == 1) return sb.startsWith(sa)
+        if (tb.size == 1) return sa.startsWith(sb)
+        val queryInCandidate = common.size.toFloat() / ta.size
+        val candidateInQuery = common.size.toFloat() / tb.size
+        return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
 }
 
 private val SEASON_MATCH_ALL_TOKENS = listOf(
@@ -692,9 +691,10 @@ suspend fun resolveWrapper(url: String, depth: Int = 0): String? {
         return resolveWrapper(next)
     }
 
-    BCLog.d("resolveWrapper no-match: ${url.take(80)}")
-    return null
-}
+        BCLog.v("resolveWrapper HTML for ${url.take(60)}: ${doc.html().take(2000)}")
+        BCLog.d("resolveWrapper no-match: ${url.take(80)}")
+        return null
+    }
 
 // ═══════════════════════════════════════════
 // ── Entry point ──
