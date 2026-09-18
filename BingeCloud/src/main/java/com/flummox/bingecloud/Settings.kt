@@ -193,7 +193,8 @@ private val DEFAULT_ON_ROWS = setOf(
     val dlg = AlertDialog.Builder(ctx).create()
     val root = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
-        background = cardBg(ctANI      setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
+        background = cardBg(ctx)
+        setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
     }
     root.addView(TextView(ctx).apply {
         text = "⚠️  Reset home to defaults?"
