@@ -97,9 +97,34 @@ fun titleMatches(a: String, b: String): Boolean {
     return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
 }
 
-private fun extractSeasons(title: String): List<Int> =
-    Regex("""(?i)\bseason\s*0*(\d+)\b""").findAll(title)
-        .mapNotNull { it.groupValues[1].toIntOrNull() }.toList()
+private val SEASON_MATCH_ALL_TOKENS = listOf(
+    "complete series", "all seasons", "season complete", "complete season"
+)
+
+private fun extractSeasons(title: String): Set<Int> {
+    val lower = title.lowercase()
+    if (SEASON_MATCH_ALL_TOKENS.any { lower.contains(it) }) return emptySet()
+
+    val out = linkedSetOf<Int>()
+
+    // Range: "Season 1-3", "Seasons 1 – 4", "S01-S03", "S1-3"
+    Regex("""(?i)\b(?:seasons?|S)\s*0*(\d+)\s*[-–—]\s*(?:S\s*)?0*(\d+)(?!\d)""")
+        .findAll(title).forEach { m ->
+            val a = m.groupValues[1].toIntOrNull() ?: return@forEach
+            val b = m.groupValues[2].toIntOrNull() ?: return@forEach
+            if (a in 1..99 && b in a..99 && b - a < 50) {
+                for (i in a..b) out.add(i)
+            }
+        }
+
+    // Singles: "Season 1", "Seasons 3", "S02"
+    Regex("""(?i)\b(?:seasons?|S)\s*0*(\d+)(?!\d)""")
+        .findAll(title).forEach { m ->
+            m.groupValues[1].toIntOrNull()?.takeIf { it in 1..99 }?.let { out.add(it) }
+        }
+
+    return out
+}
 
 private fun pageHasSeason(title: String, targetSeason: Int): Boolean {
     if (targetSeason <= 0) return true
@@ -188,14 +213,11 @@ private suspend fun vegamoviesExtractMovieRaw(pageUrl: String): List<ScrapedMirr
 private suspend fun vegamoviesExtractSeriesRaw(pageUrl: String, season: Int, episode: Int): List<ScrapedMirror> {
     val out = mutableListOf<ScrapedMirror>()
     val doc = safeGet(pageUrl) ?: return out
-    val headers = doc.select("h3, h4, h5").filter {
-        val txt = it.text()
-        Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE).containsMatchIn(txt) &&
-            !txt.contains("Zip", true)
-    }
-    val target = headers.firstOrNull {
-        Regex("""(?:Season\s*|S)(\d+)""", RegexOption.IGNORE_CASE)
-            .find(it.text())?.groupValues?.getOrNull(1)?.toIntOrNull() == season
+    val target = doc.select("h3, h4, h5").firstOrNull {
+    val txt = it.text()
+    !txt.contains("Zip", true) &&
+        Regex("""(?i)\b(?:seasons?|S)\s*0*\d""").containsMatchIn(txt) &&
+        pageHasSeason(txt, season)
     } ?: return out
     val q = Regex("""(\d{3,4}[pP])""").find(target.text())?.value ?: "Unknown"
     val nextEl = target.nextElementSibling()
@@ -268,11 +290,7 @@ private suspend fun moviesdriveExtractSeriesRaw(pageUrl: String, season: Int, ep
     for (i in allH5.indices) {
         val txt = allH5[i].text()
         val q = Regex("""(\d{3,4}[pP])""").find(txt)?.value ?: continue
-        val sMatch = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(txt)
-        if (sMatch != null) {
-            val s = sMatch.groupValues[1].toIntOrNull() ?: 0
-            if (s != season) continue
-        }
+        if (!pageHasSeason(txt, season)) continue
         if (txt.contains("Zip", true)) continue
         for (j in i + 1 until minOf(i + 4, allH5.size)) {
             val anchor = allH5[j].selectFirst("a[href*='mdrive.lol/archive/']")
