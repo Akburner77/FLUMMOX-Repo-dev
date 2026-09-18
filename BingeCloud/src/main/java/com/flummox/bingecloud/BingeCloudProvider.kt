@@ -258,6 +258,165 @@ open class BingeCloudProvider : MainAPI() {
     }
 
     // ── loadLinks ──
+    override suspend fun loadLinks(
+    data: String, isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val query = decodeQuery(data) ?: return false
+    BCLog.section("loadLinks: ${query.title} (${query.year}) ${query.type} S${query.season}E${query.episode}")
+
+    val cached = BCCache.getMirrors(query.cacheKey())
+    val mirrors = cached ?: scrapeAllSources(query)
+    if (cached != null) BCLog.d("using smart prefetch cache: ${mirrors.size} mirrors")
+    if (mirrors.isEmpty()) { BCLog.e("loadLinks: no mirrors"); return false }
+
+    val smartSort = Settings.isPrefilterEnabled()
+    val pref = Settings.getQualityPref()
+    val prefRank = qualityRank(pref)
+
+    val finalOrder: List<Pair<ScrapedMirror, Int>> = if (smartSort) {
+        mirrors
+            .map { it to LinkScore.prelimScore(it) }
+            .sortedWith(
+                compareByDescending<Pair<ScrapedMirror, Int>> {
+                    if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+                }
+                    .thenByDescending { it.second }
+                    .thenByDescending { qualityRank(it.first.quality) }
+                    .thenBy { audioPriority(it.first.mirror, it.first.source) }
+            )
+    } else {
+        mirrors
+            .map { it to 0 }
+            .sortedWith(
+                compareByDescending<Pair<ScrapedMirror, Int>> {
+                    if (prefRank > 0 && qualityRank(it.first.quality) == prefRank) 1 else 0
+                }
+                    .thenByDescending { qualityRank(it.first.quality) }
+            )
+    }
+
+    val concurrency = Settings.getConcurrency().coerceIn(1, 50)
+    BCLog.d("resolving ${finalOrder.size} mirrors (c=$concurrency, smart=$smartSort, streaming=true)")
+
+    val sem = Semaphore(concurrency)
+    val hostSems = ConcurrentHashMap<String, Semaphore>()
+    fun hostSem(host: String): Semaphore = hostSems.getOrPut(host) { Semaphore(5) }
+    val emittedCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    coroutineScope {
+        finalOrder.forEach { (m, score) ->
+            launch {
+                sem.withPermit {
+                    val host = hostOf(m.url).ifBlank { "unknown" }
+                    hostSem(host).withPermit {
+                        val emoji = if (smartSort) LinkScore.emoji(score) else ""
+                        try {
+                            when (m.source) {
+                                "ANIKOTO" -> {
+                                    var emitted = 0
+                                    val hashM3u8 = anikotoGetHashM3u8(m.url)
+                                    if (hashM3u8 != null) {
+                                        callback.invoke(newExtractorLink("AniKoto", "$emoji${m.mirror}", hashM3u8, ExtractorLinkType.M3U8) {
+                                            this.referer = "https://anikototv.to/"
+                                        })
+                                        emitted++
+                                    } else {
+                                        val domain = hostOf(m.url)
+                                        val domainHost = "https://$domain"
+                                        val isMegaFam = domain.contains("megaplay", true) ||
+                                                domain.contains("vidwish", true) ||
+                                                domain.contains("vidtube", true)
+                                        if (isMegaFam) {
+                                            try {
+                                                anikotoExtractMegaPlayUrl(m.url, "https://anikototv.to/", domainHost, "$emoji${m.mirror}", subtitleCallback) { l -> callback.invoke(l); emitted++ }
+                                            } catch (e: Exception) { BCLog.e("AniKoto resolve: ${e.message}") }
+                                        } else {
+                                            try { loadExtractor(m.url, "https://anikototv.to/", subtitleCallback) { l -> callback.invoke(l); emitted++ } } catch (_: Exception) {}
+                                        }
+                                    }
+                                    if (emitted == 0) {
+                                        HostHealth.recordFailure(host)
+                                    } else {
+                                        HostHealth.recordSuccess(host)
+                                        emittedCount.addAndGet(emitted)
+                                    }
+                                }
+                                "MB" -> {
+                                    val linkType = when {
+                                        m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                        m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                        else -> ExtractorLinkType.VIDEO
+                                    }
+                                    val display = "$emoji${m.quality} •MB ${m.mirror}"
+                                    BCLog.d("MB link: $display (score=$score)")
+                                    val hdrs = m.headers
+                                    val link = newExtractorLink("MovieBox", display, m.url, linkType) {
+                                        this.referer = "https://h5.aoneroom.com/"
+                                        if (hdrs != null) this.headers = hdrs
+                                    }
+                                    callback.invoke(link)
+                                    emittedCount.incrementAndGet()
+                                    HostHealth.recordSuccess("mb.local")
+                                }
+                                else -> {
+                                    val finalUrl = resolveWrapper(m.url)
+                                    if (finalUrl == null) {
+                                        BCLog.d("unresolved: ${m.mirror}")
+                                        HostHealth.recordFailure(host)
+                                    } else {
+                                        var emitted = 0
+                                        VCloud(m.source, m.mirror, m.quality, emoji)
+                                            .getUrl(finalUrl, "", subtitleCallback) { l -> callback.invoke(l); emitted++ }
+                                        if (emitted == 0) {
+                                            HostHealth.recordFailure(host)
+                                        } else {
+                                            HostHealth.recordSuccess(host)
+                                            emittedCount.addAndGet(emitted)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            BCLog.e("${m.mirror} failed: ${e.message}")
+                            HostHealth.recordFailure(host)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    BCLog.d("loadLinks done (${emittedCount.get()} links, streamed)")
+
+    if (Settings.isPrefetchEnabled() && query.type == "series"
+        && query.nextSeason > 0 && query.nextEpisode > 0) {
+        val nextQ = StreamQuery(
+            query.title, query.year, "series", query.imdbId,
+            query.nextSeason, query.nextEpisode
+        )
+        val nextKey = nextQ.cacheKey()
+        if (BCCache.getMirrors(nextKey) == null) {
+            activePrefetchJob?.cancel()
+            activePrefetchJob = PREFETCH_SCOPE.launch {
+                try {
+                    BCLog.d("smart prefetch next: S${query.nextSeason}E${query.nextEpisode}")
+                    val nextMirrors = scrapeAllSources(nextQ)
+                    BCCache.putMirrors(nextKey, nextMirrors)
+                    BCLog.d("smart prefetch next done: ${nextMirrors.size} mirrors")
+                } catch (e: CancellationException) {
+                    BCLog.d("smart prefetch next cancelled")
+                } catch (e: Exception) {
+                    BCLog.e("smart prefetch next failed: ${e.message}")
+                }
+            }
+        }
+    }
+    return true
+    }
+
+    
     
     private fun hostOf(url: String): String = try {
         java.net.URI(url).host ?: ""
