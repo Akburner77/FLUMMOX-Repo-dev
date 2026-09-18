@@ -70,8 +70,6 @@ object Settings {
     const val K_ROW_ORDER = "bingecloud_row_order"
     const val K_ROW_TRENDING_MOVIES = "bingecloud_row_trending_movies"
     const val K_ROW_TRENDING_SERIES = "bingecloud_row_trending_series"
-    const val K_ROW_POPULAR_MOVIES = "bingecloud_row_popular_movies"
-    const val K_ROW_POPULAR_SERIES = "bingecloud_row_popular_series"
     const val K_ROW_TVDB_MOVIES = "bingecloud_row_tvdb_movies"
     const val K_ROW_TVDB_SERIES = "bingecloud_row_tvdb_series"
     const val K_ROW_TVDB_GENRES_MOVIES = "bingecloud_row_tvdb_genres_movies"
@@ -112,9 +110,7 @@ object Settings {
     // ── Trending ──
     RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
     RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
-    RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.trending", "Popular Movies", "Week", "TMDB • This Week"),
-    RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.trending", "Popular Series", "Week", "TMDB • This Week"),
-
+    
     // ── Streaming platforms ──
     RowSpec(K_ROW_STREAM_NETFLIX, "movie", "tmdb.provider.8", "Netflix", null, "Netflix"),
     RowSpec(K_ROW_STREAM_PRIME, "movie", "tmdb.provider.9", "Prime Video", null, "Prime Video"),
@@ -157,14 +153,15 @@ object Settings {
 private val DEFAULT_ON_ROWS = setOf(
     K_ROW_TRENDING_MOVIES,
     K_ROW_TRENDING_SERIES,
-    K_ROW_POPULAR_MOVIES,
-    K_ROW_POPULAR_SERIES,
     K_ROW_STREAM_NETFLIX,
     K_ROW_STREAM_PRIME,
+    K_ROW_STREAM_DISNEY,
+    K_ROW_STREAM_JIOHOTSTAR,
     K_ROW_HINDI_MOVIES,
     K_ROW_HINDI_SERIES,
     K_ROW_TOP_ANIME,
     K_ROW_AIRING_ANIME,
+    K_ROW_MOST_POPULAR_ANIME,
 )
 
     // ── row order ──
