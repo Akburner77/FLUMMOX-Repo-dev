@@ -669,33 +669,32 @@ suspend fun resolveWrapper(url: String, depth: Int = 0): String? {
 
     // hubcdn.wiki/file/X style: JS sets `var reurl = "https://decoy/?r=<b64>"`
     // b64 payload decodes to https://hubcdn.club/dl/?link=<R2 URL>
-    val reurl = Regex("""var\s+reurl\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-    .find(doc.html())?.groupValues?.get(1)
-    if (!reurl.isNullOrBlank()) {
-    val b64 = Regex("""[?&]r=([A-Za-z0-9+/=_-]+)""").find(reurl)?.groupValues?.get(1)
-    if (!b64.isNullOrBlank()) {
-        try {
-            val normalized = b64.replace('-', '+').replace('_', '/')
-            val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
-            val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT)).trim()
-            if (decoded.startsWith("http")) {
-                // hubcdn.club/dl/?link=... is a gateway — extract the real R2 file URL
-                val linkParam = Regex("""[?&]link=(https?://[^\s&]+)""").find(decoded)?.groupValues?.get(1)
-                val finalUrl = if (!linkParam.isNullOrBlank()) linkParam else decoded
-                BCLog.d("resolveWrapper reurl → ${finalUrl.take(100)}")
-                return finalUrl
+        val reurl = Regex("""var\s+reurl\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        .find(doc.html())?.groupValues?.get(1)
+        if (!reurl.isNullOrBlank()) {
+        val b64 = Regex("""[?&]r=([A-Za-z0-9+/=_-]+)""").find(reurl)?.groupValues?.get(1)
+        if (!b64.isNullOrBlank()) {
+            try {
+                val normalized = b64.replace('-', '+').replace('_', '/')
+                val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+                val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT)).trim()
+                if (decoded.contains("r2.dev", ignoreCase = true)) {
+                    BCLog.d("resolveWrapper skip r2.dev (unplayable): ${decoded.take(80)}")
+                    return null
+                }
+                if (decoded.startsWith("http")) {
+                    BCLog.d("resolveWrapper reurl → ${decoded.take(100)}")
+                    return decoded
+                }
+            } catch (e: Exception) {
+                BCLog.e("resolveWrapper reurl decode failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            BCLog.e("resolveWrapper reurl decode failed: ${e.message}")
         }
     }
-}
 
-    BCLog.v("resolveWrapper HTML for ${url.take(60)}: ${doc.html().take(2000)}")
     BCLog.d("resolveWrapper no-match: ${url.take(80)}")
     return null
 }
-
 // ═══════════════════════════════════════════
 // ── Entry point ──
 // ═══════════════════════════════════════════
