@@ -309,14 +309,14 @@ private suspend fun extractFromArchivePage(archiveUrl: String, quality: String, 
                 }
                 if (allH5[j].text().contains(Regex("""EP\s*0*\d+""", RegexOption.IGNORE_CASE))) break
             }
-        } else {
-            for (a in h.select("a[href]")) {
+                } else if (targetEp <= 0) {
+                for (a in h.select("a[href]")) {
                 val href = a.attr("href"); val label = a.text().lowercase()
                 when {
-                    href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HCloud", href, "MD"))
-                    href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
-                }
-            }
+                href.contains("hubcloud", true) -> out.add(ScrapedMirror(quality, "HCloud", href, "MD"))
+                href.contains("gdflix", true) || label.contains("gdflix") -> out.add(ScrapedMirror(quality, "GDFlix", href, "MD"))
+             }
+           }
         }
     }
     return out
@@ -509,8 +509,8 @@ private suspend fun anikotoFindSeries(title: String): AnikotoSeries? {
         val candTitle = titleEl.text().trim().ifBlank { titleEl.attr("title").trim() }
         if (href.isBlank() || candTitle.isBlank()) continue
         val score = anikotoScore(title, candTitle)
-        if (score > bestScore) {
-            bestScore = score
+        if (score > bestScore && score >= 20) {
+        bestScore = score
             val full = if (href.startsWith("http")) href else "$ANIKOTO_DOMAIN$href"
             // strip trailing /ep-N to get the SERIES page URL, not the episode page
             val seriesUrl = full.replace(Regex("""/ep-\d+/?$"""), "").trimEnd('/')
