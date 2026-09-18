@@ -355,11 +355,14 @@ open class BingeCloudProvider : MainAPI() {
                                     val hdrs = m.headers
                                     val link = newExtractorLink("MovieBox", display, m.url, linkType) {
                                         this.referer = "https://h5.aoneroom.com/"
-                                        if (hdrs != null) this.headers = hdrs
+                                    if (hdrs != null) this.headers = hdrs
                                     }
-                                    callback.invoke(link)
-                                    emittedCount.incrementAndGet()
-                                    HostHealth.recordSuccess("mb.local")
+                                        callback.invoke(link)
+                                        emittedCount.incrementAndGet()
+                                        HostHealth.recordSuccess("mb.local")
+                                        m.captions.forEach { (lang, subUrl) ->
+                                    try { subtitleCallback(SubtitleFile(lang, subUrl)) } catch (_: Exception) {}
+                                    }
                                 }
                                 else -> {
                                     val finalUrl = resolveWrapper(m.url)
