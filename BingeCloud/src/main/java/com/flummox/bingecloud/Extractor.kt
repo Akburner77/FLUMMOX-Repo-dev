@@ -225,11 +225,16 @@ open class VCloud(
                    BCLog.d("VCloud skip 10Gbps anchor")
                    continue
                    }
-        // r2.dev / cloudflarestorage URLs without a file extension don't play in ExoPlayer
-                if (href.contains("r2.dev", ignoreCase = true) && !href.contains(".", href.indexOf("r2.dev"))) {
-                    BCLog.d("VCloud skip r2.dev gateway anchor")
-                    continue
-                }
+        // r2.dev anchor without a video file extension → gateway, not a playable file
+               if (href.contains("r2.dev", ignoreCase = true)) {
+                   val isVideoExt = href.endsWith(".mp4", true) || href.endsWith(".mkv", true) ||
+                       href.endsWith(".webm", true) || href.endsWith(".m3u8", true) ||
+                       href.endsWith(".mpd", true)
+                  if (!isVideoExt) {
+                       BCLog.d("VCloud skip r2.dev gateway anchor")
+                       continue
+                  }
+               }
                    val display = displayName(serverName)
                     BCLog.d("VCloud OK: $display (${System.currentTimeMillis() - startMs}ms)")
                     BCCache.put(cacheKey, href)
