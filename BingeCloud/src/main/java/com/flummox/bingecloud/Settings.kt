@@ -92,6 +92,7 @@ object Settings {
     const val K_ROW_HINDI_MOVIES = "bingecloud_row_hindi_movies"
     const val K_ROW_HINDI_SERIES = "bingecloud_row_hindi_series"
     const val K_ROW_ANIME_SCHEDULE = "bingecloud_row_anime_schedule"
+    const val K_VERBOSE_LOG = "bingecloud_verbose_log"
 
     val DEFAULT_CF_DOMAINS = emptyList<String>()
 
@@ -159,6 +160,7 @@ object Settings {
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
     fun isPrefetchEnabled(): Boolean = getKey<Boolean>(K_PREFETCH) ?: true
     fun getQualityPref(): String = getKey<String>(K_QUALITY) ?: "Auto"
+    fun isVerboseLog(): Boolean = getKey<Boolean>(K_VERBOSE_LOG) ?: false
 
     // ── CF cookies ──
     fun getCfDomains(): List<String> =
@@ -853,10 +855,18 @@ object Settings {
 
         // ── DEBUG LOGS ──
         run {
-            val c = buildCard(
+             val c = buildCard(
                 ctx, "🐞", "Debug Logs",
-                "Local · ${BCLog.count()} lines • tap ▸ to expand"
-            )
+               "Local · ${BCLog.count()} lines • tap ▸ to expand"
+             )
+               c.body.addView(toggleRow(
+               ctx, "Verbose logging",
+              "Log full URLs, HTML dumps, tokens — off for normal use",
+              isVerboseLog()
+              ) { enabled ->
+              setKey(K_VERBOSE_LOG, enabled)
+              BCLog.setVerbose(enabled)
+            })
             val logView = TextView(ctx).apply {
                 typeface = Typeface.MONOSPACE
                 textSize = 10f
