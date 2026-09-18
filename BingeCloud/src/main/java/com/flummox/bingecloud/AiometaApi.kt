@@ -109,7 +109,7 @@ suspend fun aioSearch(query: String, type: String): List<AioMeta> {
         emptyList()
     }
 }
-// ── TMDB Discover (for streaming-platform catalogs) ──
+// ── TMDB Discover (streaming-platform catalogs) ──
 data class TmdbDiscoverItem(
     val id: Int? = null,
     val title: String? = null,
@@ -128,11 +128,10 @@ data class TmdbDiscoverResponse(
     val total_pages: Int? = null
 )
 
-suspend fun tmdbDiscover(
-    tmdbType: String,       // "movie" or "tv"
-    providerId: Int,
-    region: String,         // "US" or "IN"
-    skip: Int
+private val INDIAN_ONLY_PROVIDERS = setOf(122, 220, 237, 232)
+
+private suspend fun tmdbDiscover(
+    tmdbType: String, providerId: Int, region: String, skip: Int
 ): List<AioMeta> {
     val key = BuildConfig.TMDB_API_KEY
     if (key.isBlank()) return emptyList()
@@ -153,6 +152,16 @@ suspend fun tmdbDiscover(
     }
 }
 
+suspend fun tmdbDiscoverMerged(providerId: Int, skip: Int): List<AioMeta> {
+    val regions = if (providerId in INDIAN_ONLY_PROVIDERS) listOf("IN") else listOf("US", "IN")
+    val all = mutableListOf<AioMeta>()
+    for (r in regions) {
+        all += tmdbDiscover("movie", providerId, r, skip)
+        all += tmdbDiscover("tv", providerId, r, skip)
+    }
+    return all.distinctBy { it.id }
+}
+
 private fun TmdbDiscoverItem.toAioMeta(tmdbType: String): AioMeta? {
     val itemId = id ?: return null
     val itemName = title ?: name ?: return null
@@ -170,3 +179,4 @@ private fun TmdbDiscoverItem.toAioMeta(tmdbType: String): AioMeta? {
         year = yearStr
     )
 }
+
