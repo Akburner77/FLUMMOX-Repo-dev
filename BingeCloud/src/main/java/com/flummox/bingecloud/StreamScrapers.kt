@@ -560,8 +560,8 @@ private suspend fun anikotoResolvePlayerUrl(linkId: String, referer: String): St
             if (raw.contains("\"message\"")) continue
             val viaResult = anikotoResultUrl(raw)
             if (viaResult != null) {
-                BCLog.d("AniKoto OK via $ep")
-                return viaResult
+            BCLog.v("AniKoto OK via $ep")
+            return viaResult
             }
             try {
                 val obj = JSONObject(raw)
@@ -597,7 +597,7 @@ private suspend fun anikotoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     }
     if (listJson.isBlank()) return emptyList()
 
-    BCLog.d("AniKoto server list HTML: ${listJson.replace('\n',' ')}")
+    BCLog.v("AniKoto server list HTML: ${listJson.replace('\n',' ')}")
 
     val doc = Jsoup.parse(listJson)
     val entries = mutableListOf<Pair<String, String>>()
