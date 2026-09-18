@@ -109,3 +109,64 @@ suspend fun aioSearch(query: String, type: String): List<AioMeta> {
         emptyList()
     }
 }
+// ── TMDB Discover (for streaming-platform catalogs) ──
+data class TmdbDiscoverItem(
+    val id: Int? = null,
+    val title: String? = null,
+    val name: String? = null,
+    val poster_path: String? = null,
+    val backdrop_path: String? = null,
+    val release_date: String? = null,
+    val first_air_date: String? = null,
+    val vote_average: Double? = null,
+    val overview: String? = null
+)
+
+data class TmdbDiscoverResponse(
+    val page: Int? = null,
+    val results: List<TmdbDiscoverItem>? = null,
+    val total_pages: Int? = null
+)
+
+suspend fun tmdbDiscover(
+    tmdbType: String,       // "movie" or "tv"
+    providerId: Int,
+    region: String,         // "US" or "IN"
+    skip: Int
+): List<AioMeta> {
+    val key = BuildConfig.TMDB_API_KEY
+    if (key.isBlank()) return emptyList()
+    val page = (skip / 20).coerceAtLeast(0) + 1
+    val url = "https://api.themoviedb.org/3/discover/$tmdbType" +
+        "?api_key=$key" +
+        "&with_watch_providers=$providerId" +
+        "&watch_region=$region" +
+        "&sort_by=popularity.desc" +
+        "&page=$page"
+    return try {
+        val json = app.get(url).text
+        val parsed = tryParseJson<TmdbDiscoverResponse>(json)
+        parsed?.results?.mapNotNull { it.toAioMeta(tmdbType) } ?: emptyList()
+    } catch (e: Exception) {
+        BCLog.e("TMDB discover failed: ${e.message}")
+        emptyList()
+    }
+}
+
+private fun TmdbDiscoverItem.toAioMeta(tmdbType: String): AioMeta? {
+    val itemId = id ?: return null
+    val itemName = title ?: name ?: return null
+    val dateStr = release_date ?: first_air_date
+    val yearStr = dateStr?.take(4)
+    return AioMeta(
+        id = "tmdb:$itemId",
+        name = itemName,
+        type = if (tmdbType == "tv") "series" else "movie",
+        description = overview,
+        poster = poster_path?.let { "https://image.tmdb.org/t/p/w500$it" },
+        background = backdrop_path?.let { "https://image.tmdb.org/t/p/original$it" },
+        imdbRating = vote_average?.toString(),
+        releaseInfo = yearStr,
+        year = yearStr
+    )
+}
