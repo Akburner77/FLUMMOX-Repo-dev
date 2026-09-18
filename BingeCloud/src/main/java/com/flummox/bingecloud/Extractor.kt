@@ -119,7 +119,8 @@ private fun linkTypeFor(url: String): ExtractorLinkType {
 
 // ── dead hosts: don't waste time on them ──
 private val DEAD_HOSTS = setOf(
-    "gdflix.dev"
+    "gdflix.dev",
+    "hubcloud.cx"
 )
 
 // ══════════════════════════════════════════════════════════════
