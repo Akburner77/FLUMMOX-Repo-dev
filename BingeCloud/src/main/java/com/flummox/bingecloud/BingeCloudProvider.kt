@@ -68,12 +68,22 @@ open class BingeCloudProvider : MainAPI() {
         val parts = request.data.split(ROW_TAG)
         if (parts.size < 2) return null
         lastHomeRenderMs = System.currentTimeMillis()
-        val raw = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-        val items = raw
-            .filter { !it.isJunk() }
-            .mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = raw.size >= 25)
-    }
+        val isStreaming = parts[1].startsWith("tmdb.provider.")
+        val raw: List<AioMeta> = if (isStreaming) {
+            val sub = parts[1].split(".")
+            val region = sub.getOrNull(2) ?: "US"
+            val providerId = sub.getOrNull(3)?.toIntOrNull() ?: 0
+            val tmdbType = if (parts[0] == "movie") "movie" else "tv"
+            tmdbDiscover(tmdbType, providerId, region, (page - 1) * 20)
+        } else {
+            aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+       }
+       val items = raw
+           .filter { !it.isJunk() }
+           .mapNotNull { it.toSearchResponse() }
+       val hasMore = if (isStreaming) raw.size >= 20 else raw.size >= 25
+       return newHomePageResponse(request.name, items, hasNext = hasMore)
+       }
 
     // ── search ──
     override suspend fun search(query: String): List<SearchResponse>? {
