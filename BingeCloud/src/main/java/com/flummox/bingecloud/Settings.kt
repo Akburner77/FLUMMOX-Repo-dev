@@ -161,7 +161,6 @@ private val DEFAULT_ON_ROWS = setOf(
     K_ROW_HINDI_SERIES,
     K_ROW_TOP_ANIME,
     K_ROW_AIRING_ANIME,
-    K_ROW_MOST_POPULAR_ANIME,
 )
 
     // ── row order ──
@@ -194,8 +193,7 @@ private val DEFAULT_ON_ROWS = setOf(
     val dlg = AlertDialog.Builder(ctx).create()
     val root = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
-        background = cardBg(ctx)
-        setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
+        background = cardBg(ctANI      setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
     }
     root.addView(TextView(ctx).apply {
         text = "⚠️  Reset home to defaults?"
