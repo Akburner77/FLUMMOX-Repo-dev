@@ -24,7 +24,6 @@ class BingeCloudPlugin : Plugin() {
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
         registerExtractorAPI(Filepress())
-        registerExtractorAPI(GogoCdn())
 
         this.openSettings = { ctx: Context ->
             Settings.showSettingsDialog(ctx) {
