@@ -51,27 +51,28 @@ open class BingeCloudProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val instantLinkLoading = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
-    override val mainPage = mainPageOf(
-        *Settings.getRowOrder()
-            .mapNotNull { key ->
-                val spec = Settings.getRowSpecByKey(key) ?: return@mapNotNull null
-                if (!Settings.isRowEnabled(key)) return@mapNotNull null
-                val id = if (spec.defaultGenre != null)
-                    "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
-                else spec.catalogId
-                "${spec.type}$ROW_TAG$id$ROW_TAG${spec.name}" to spec.name
-            }.toTypedArray()
-    )
+    override val mainPage get() = mainPageOf(
+    *Settings.getRowOrder()
+        .mapNotNull { key ->
+            val spec = Settings.getRowSpecByKey(key) ?: return@mapNotNull null
+            if (!Settings.isRowEnabled(key)) return@mapNotNull null
+            val id = if (spec.defaultGenre != null)
+                "${spec.catalogId}$ROW_TAG${spec.defaultGenre}"
+            else spec.catalogId
+            "${spec.type}$ROW_TAG$id$ROW_TAG${spec.name}" to spec.name
+        }.toTypedArray()
+)
 
     // ── home ──
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val parts = request.data.split(ROW_TAG)
         if (parts.size < 2) return null
         lastHomeRenderMs = System.currentTimeMillis()
-        val items = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-        .filter { !it.isJunk() }
-        .mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        val raw = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+        val items = raw
+            .filter { !it.isJunk() }
+            .mapNotNull { it.toSearchResponse() }
+        return newHomePageResponse(request.name, items, hasNext = raw.size >= 25)
     }
 
     // ── search ──
