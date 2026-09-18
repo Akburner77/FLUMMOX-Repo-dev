@@ -740,10 +740,14 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         })
         
         if (Settings.isSrcMovieBox()) jobs.add(async {
-            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
-                try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
-            } ?: run { BCLog.d("MB timeout"); emptyList() }
-        })
+    kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+        try {
+            com.flummox.bingecore.SpeedBooster.deduped("mb:${q.cacheKey()}") {
+                movieboxExtractRaw(q)
+            }
+        } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+    } ?: run { BCLog.d("MB timeout"); emptyList() }
+})
         if (Settings.isSrcAnikoto()) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
                 try {
