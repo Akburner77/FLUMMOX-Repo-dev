@@ -91,49 +91,81 @@ object Settings {
     const val K_ROW_HINDI_MOVIES = "bingecloud_row_hindi_movies"
     const val K_ROW_HINDI_SERIES = "bingecloud_row_hindi_series"
     const val K_ROW_ANIME_SCHEDULE = "bingecloud_row_anime_schedule"
-    const val K_VERBOSE_LOG = "bingecloud_verbose_log"
 
-    val DEFAULT_CF_DOMAINS = emptyList<String>()
+// ── Streaming platforms (one row per platform, mixed movie + series) ──
+    const val K_ROW_STREAM_NETFLIX = "bingecloud_row_stream_netflix"
+    const val K_ROW_STREAM_PRIME = "bingecloud_row_stream_prime"
+    const val K_ROW_STREAM_DISNEY = "bingecloud_row_stream_disney"
+    const val K_ROW_STREAM_MAX = "bingecloud_row_stream_max"
+    const val K_ROW_STREAM_APPLETV = "bingecloud_row_stream_appletv"
+    const val K_ROW_STREAM_JIOHOTSTAR = "bingecloud_row_stream_jiohotstar"
+    const val K_ROW_STREAM_JIOCINEMA = "bingecloud_row_stream_jiocinema"
+    const val K_ROW_STREAM_SONYLIV = "bingecloud_row_stream_sonyliv"
+    const val K_ROW_STREAM_ZEE5 = "bingecloud_row_stream_zee5"
+
+    const val K_VERBOSE_LOG = "bingecloud_verbose_log"
 
     // ══════════════════════════════════════════════════════════
     // ── ALL ROWS ──
     // ══════════════════════════════════════════════════════════
     val ALL_ROWS: List<RowSpec> = listOf(
-        RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
-        RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
-        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.trending", "Popular Movies", "Week", "TMDB • This Week"),
-        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.trending", "Popular Series", "Week", "TMDB • This Week"),
-        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "Hindi", "TMDB • Hindi"),
-        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "Hindi", "TMDB • Hindi"),
-        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
-        RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
-        RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
-        RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "Monday", "MAL"),
-        RowSpec(K_ROW_TOP_ANIME_MOVIES, "anime", "mal.top_movies", "Top Anime Movies", null, "MAL"),
-        RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
-        RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
-        RowSpec(K_ROW_MOST_FAV_ANIME, "anime", "mal.most_favorites", "Most Favorited Anime", null, "MAL"),
-        RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best of 2020s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best of 2010s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best of 2000s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best of 90s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best of 80s", "genre=Action", "MAL"),
-    )
+    // ── Trending ──
+    RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
+    RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
+    RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.trending", "Popular Movies", "Week", "TMDB • This Week"),
+    RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.trending", "Popular Series", "Week", "TMDB • This Week"),
 
-    private val DEFAULT_ON_ROWS = setOf(
-        K_ROW_TRENDING_MOVIES,
-        K_ROW_TRENDING_SERIES,
-        K_ROW_POPULAR_MOVIES,
-        K_ROW_POPULAR_SERIES,
-        K_ROW_HINDI_MOVIES,
-        K_ROW_HINDI_SERIES,
-        K_ROW_TOP_ANIME,
-        K_ROW_AIRING_ANIME
-    )
+    // ── Streaming platforms ──
+    RowSpec(K_ROW_STREAM_NETFLIX, "movie", "tmdb.provider.8", "Netflix", null, "Netflix"),
+    RowSpec(K_ROW_STREAM_PRIME, "movie", "tmdb.provider.9", "Prime Video", null, "Prime Video"),
+    RowSpec(K_ROW_STREAM_DISNEY, "movie", "tmdb.provider.337", "Disney+", null, "Disney+"),
+    RowSpec(K_ROW_STREAM_MAX, "movie", "tmdb.provider.1899", "Max", null, "Max"),
+    RowSpec(K_ROW_STREAM_APPLETV, "movie", "tmdb.provider.350", "Apple TV+", null, "Apple TV+"),
+    RowSpec(K_ROW_STREAM_JIOHOTSTAR, "movie", "tmdb.provider.122", "JioHotstar", null, "JioHotstar"),
+    RowSpec(K_ROW_STREAM_JIOCINEMA, "movie", "tmdb.provider.220", "JioCinema", null, "JioCinema"),
+    RowSpec(K_ROW_STREAM_SONYLIV, "movie", "tmdb.provider.237", "SonyLIV", null, "SonyLIV"),
+    RowSpec(K_ROW_STREAM_ZEE5, "movie", "tmdb.provider.232", "ZEE5", null, "ZEE5"),
+
+    // ── Indian ──
+    RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "Hindi", "TMDB • Hindi"),
+    RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "Hindi", "TMDB • Hindi"),
+
+    // ── Anime ──
+    RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
+    RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
+    RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
+    RowSpec(K_ROW_MOST_FAV_ANIME, "anime", "mal.most_favorites", "Most Favorited Anime", null, "MAL"),
+    RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
+    RowSpec(K_ROW_TOP_ANIME_MOVIES, "anime", "mal.top_movies", "Top Anime Movies", null, "MAL"),
+    RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
+    RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "Monday", "MAL"),
+
+    // ── TVDB ──
+    RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
+    RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "genre=Action", "TVDB"),
+    RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "genre=Action", "TVDB"),
+    RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "genre=Action", "TVDB"),
+
+    // ── Best Anime of decade ──
+    RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best Anime of 2020s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best Anime of 2010s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best Anime of 2000s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best Anime of 90s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best Anime of 80s", "genre=Action", "MAL"),
+)
+
+private val DEFAULT_ON_ROWS = setOf(
+    K_ROW_TRENDING_MOVIES,
+    K_ROW_TRENDING_SERIES,
+    K_ROW_POPULAR_MOVIES,
+    K_ROW_POPULAR_SERIES,
+    K_ROW_STREAM_NETFLIX,
+    K_ROW_STREAM_PRIME,
+    K_ROW_HINDI_MOVIES,
+    K_ROW_HINDI_SERIES,
+    K_ROW_TOP_ANIME,
+    K_ROW_AIRING_ANIME,
+)
 
     // ── row order ──
     fun getRowOrder(): List<String> {
