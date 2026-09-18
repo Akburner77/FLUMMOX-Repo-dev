@@ -182,7 +182,8 @@ suspend fun anikotoExtractMegaPlayUrl(
     if (m3u8.isNullOrBlank()) { BCLog.d("AniKoto: no m3u8"); return }
 
     val signed = anikotoSignMegaPlayUrl(m3u8)
-    BCLog.d("AniKoto emit [$label] ref=$host/ url=$signed")
+    BCLog.d("AniKoto emit [$label]")
+    BCLog.v("AniKoto emit url=$signed")
 
     val link = newExtractorLink(
         source = "AniKoto",
