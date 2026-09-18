@@ -211,7 +211,12 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
     BCCache.get(cacheKey)?.let { return parseSearchResults(it) }
 
     val session = ensureSession() ?: return emptyList()
-    val jsonBody = "{\"page\": $page, \"perPage\": 20, \"keyword\": \"$query\", \"restrictKid\": 1}"
+    val jsonBody = JSONObject().apply {
+        put("page", page)
+        put("perPage", 20)
+        put("keyword", query)
+        put("restrictKid", 1)
+    }.toString()
 
     for (host in MB_HOSTS) {
         try {
