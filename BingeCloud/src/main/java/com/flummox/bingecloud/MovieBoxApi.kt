@@ -175,7 +175,8 @@ data class MBStream(
     val size: String?,
     val signCookie: String? = null,
     val audio: String? = null,
-    val durationSec: Long = 0L
+    val durationSec: Long = 0L,
+    val captions: List<Pair<String, String>> = emptyList()
 )
 
 private fun extractPolicyResource(signCookie: String?): String? {
@@ -238,8 +239,22 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
 private fun parseSearchResults(text: String): List<MBSubject> {
     val json = try { JSONObject(text) } catch (_: Exception) { return emptyList() }
     val results = json.optJSONObject("data")?.optJSONArray("results") ?: return emptyList()
-    val out = mutableListOf<MBSubject>()
-    for (i in 0 until results.length()) {
+   val captionsList = mutableListOf<Pair<String, String>>()
+val captionsArr = root.optJSONArray("captions")
+    ?: root.optJSONArray("subtitle")
+    ?: root.optJSONArray("subtitles")
+if (captionsArr != null) {
+    for (i in 0 until captionsArr.length()) {
+        val c = captionsArr.optJSONObject(i) ?: continue
+        val lang = c.optString("language").ifBlank { c.optString("lang") }.ifBlank { "Unknown" }
+        val url = c.optString("url").ifBlank { c.optString("file") }
+        if (url.isNotBlank()) captionsList.add(lang to url)
+    }
+}
+if (captionsList.isNotEmpty()) BCLog.d("MB captions: ${captionsList.map { it.first }}")
+
+val out = mutableListOf<MBStream>()
+for (i in 0 until arr.length()) {
         val subs = results.optJSONObject(i)?.optJSONArray("subjects") ?: continue
         for (j in 0 until subs.length()) {
             val s = subs.optJSONObject(j) ?: continue
@@ -304,14 +319,15 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         BCLog.d("MB raw [$audioLabel] dur=${dur}s fmt=${o.optString("format")} codec=${o.optString("codecName")} size=${o.optString("size")} realUrl=$urlHead")
 
         out.add(MBStream(
-            url = url,
-            realUrl = realUrl,
-            quality = quality,
-            size = o.optString("size").ifBlank { null },
-            signCookie = signCookie,
-            audio = audioLabel,
-            durationSec = dur
-        ))
+    url = url,
+    realUrl = realUrl,
+    quality = quality,
+    size = o.optString("size").ifBlank { null },
+    signCookie = signCookie,
+    audio = audioLabel,
+    durationSec = dur,
+    captions = captionsList
+))
     }
     BCLog.d("MB play [$audioLabel]: ${out.size} streams")
     return out
