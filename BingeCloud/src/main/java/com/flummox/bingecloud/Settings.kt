@@ -180,7 +180,9 @@ private val DEFAULT_ON_ROWS = setOf(
 
     fun getRowSpecByKey(key: String): RowSpec? = ALL_ROWS.firstOrNull { it.key == key }
 
-    
+    fun isRowEnabled(key: String): Boolean =
+        getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
+
     fun resetHomeToDefaults() {
         setKey(K_ROW_ORDER, ALL_ROWS.map { it.key }.joinToString("|"))
         for (spec in ALL_ROWS) {
