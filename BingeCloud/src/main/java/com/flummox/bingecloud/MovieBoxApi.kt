@@ -239,22 +239,8 @@ suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
 private fun parseSearchResults(text: String): List<MBSubject> {
     val json = try { JSONObject(text) } catch (_: Exception) { return emptyList() }
     val results = json.optJSONObject("data")?.optJSONArray("results") ?: return emptyList()
-   val captionsList = mutableListOf<Pair<String, String>>()
-val captionsArr = root.optJSONArray("captions")
-    ?: root.optJSONArray("subtitle")
-    ?: root.optJSONArray("subtitles")
-if (captionsArr != null) {
-    for (i in 0 until captionsArr.length()) {
-        val c = captionsArr.optJSONObject(i) ?: continue
-        val lang = c.optString("language").ifBlank { c.optString("lang") }.ifBlank { "Unknown" }
-        val url = c.optString("url").ifBlank { c.optString("file") }
-        if (url.isNotBlank()) captionsList.add(lang to url)
-    }
-}
-if (captionsList.isNotEmpty()) BCLog.d("MB captions: ${captionsList.map { it.first }}")
-
-val out = mutableListOf<MBStream>()
-for (i in 0 until arr.length()) {
+    val out = mutableListOf<MBSubject>()
+    for (i in 0 until results.length()) {
         val subs = results.optJSONObject(i)?.optJSONArray("subjects") ?: continue
         for (j in 0 until subs.length()) {
             val s = subs.optJSONObject(j) ?: continue
@@ -296,8 +282,23 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
     val root = json.optJSONObject("data") ?: json
-    val arr = root.optJSONArray("streams") ?: root.optJSONArray("videos") ?: root.optJSONArray("list") ?: return emptyList()
-    val out = mutableListOf<MBStream>()
+val arr = root.optJSONArray("streams") ?: root.optJSONArray("videos") ?: root.optJSONArray("list") ?: return emptyList()
+
+val captionsList = mutableListOf<Pair<String, String>>()
+val captionsArr = root.optJSONArray("captions")
+    ?: root.optJSONArray("subtitle")
+    ?: root.optJSONArray("subtitles")
+if (captionsArr != null) {
+    for (i in 0 until captionsArr.length()) {
+        val c = captionsArr.optJSONObject(i) ?: continue
+        val lang = c.optString("language").ifBlank { c.optString("lang") }.ifBlank { "Unknown" }
+        val url = c.optString("url").ifBlank { c.optString("file") }
+        if (url.isNotBlank()) captionsList.add(lang to url)
+    }
+}
+if (captionsList.isNotEmpty()) BCLog.d("MB captions: ${captionsList.map { it.first }}")
+
+val out = mutableListOf<MBStream>()
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
