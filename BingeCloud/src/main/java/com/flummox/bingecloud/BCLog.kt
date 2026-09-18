@@ -45,9 +45,12 @@ object BCLog {
     }
 
     fun init(context: Context) {
-        synchronized(lock) {
-            try {
-                val f = File(context.filesDir, "bingelog.txt")
+    synchronized(lock) {
+        try {
+            try { writer?.close() } catch (_: Exception) {}
+            writer = null
+            buffer.clear()
+            val f = File(context.filesDir, "bingelog.txt")
                 if (f.exists() && f.length() > MAX_FILE_BYTES) {
                     // rotate: keep last half
                     val lines = f.readLines().takeLast(MAX_LINES / 2)
