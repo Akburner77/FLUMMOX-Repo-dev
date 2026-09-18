@@ -654,15 +654,45 @@ private suspend fun anikotoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
 // ═══════════════════════════════════════════
 // ── Wrapper resolution ──
 // ═══════════════════════════════════════════
-suspend fun resolveWrapper(url: String): String? {
+suspend fun resolveWrapper(url: String, depth: Int = 0): String? {
+    if (depth > 3) return null
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
     if (url.contains("gdflix", true)) return url
     if (url.contains("greenmountmotors.com") || url.contains("hdstream4u.com")) return null
+
     val doc = cloudflareGetDoc(url) ?: return null
+
+    // Direct anchor hits
     doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='gdflix']")?.attr("href")?.let { return it }
+
+    // Meta refresh redirect (hubdrive / hubcdn)
+    doc.selectFirst("meta[http-equiv=refresh]")?.attr("content")?.let { content ->
+        Regex("""url=([^"'>\s]+)""", RegexOption.IGNORE_CASE).find(content)?.groupValues?.get(1)?.let {
+            val next = when {
+                it.startsWith("//") -> "https:$it"
+                it.startsWith("/") -> "https://${java.net.URI(url).host}$it"
+                else -> it
+            }
+            return resolveWrapper(next)
+        }
+    }
+
+    // JS window.location redirect
+    val jsRedirect = Regex("""(?:window\.location|location\.href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        .find(doc.html())?.groupValues?.get(1)
+    if (!jsRedirect.isNullOrBlank()) {
+        val next = when {
+            jsRedirect.startsWith("//") -> "https:$jsRedirect"
+            jsRedirect.startsWith("/") -> "https://${java.net.URI(url).host}$jsRedirect"
+            else -> jsRedirect
+        }
+        return resolveWrapper(next)
+    }
+
+    BCLog.d("resolveWrapper no-match: ${url.take(80)}")
     return null
 }
 
