@@ -219,7 +219,18 @@ open class VCloud(
                      href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
                      href.contains("busycdn", true) || href.contains("video-downloads", true))) {
                     val serverName = a.text().ifBlank { "HubCloud" }.trim()
-                    val display = displayName(serverName)
+         // 10Gbps CDN returns URLs that load but don't play — skip until upstream fixed
+                if (serverName.contains("10gbps", ignoreCase = true) ||
+                   serverName.contains("10 gbps", ignoreCase = true)) {
+                   BCLog.d("VCloud skip 10Gbps anchor")
+                   continue
+                   }
+        // r2.dev / cloudflarestorage URLs without a file extension don't play in ExoPlayer
+                if (href.contains("r2.dev", ignoreCase = true) && !href.contains(".", href.indexOf("r2.dev"))) {
+                    BCLog.d("VCloud skip r2.dev gateway anchor")
+                    continue
+                }
+                   val display = displayName(serverName)
                     BCLog.d("VCloud OK: $display (${System.currentTimeMillis() - startMs}ms)")
                     BCCache.put(cacheKey, href)
                     callback.invoke(
