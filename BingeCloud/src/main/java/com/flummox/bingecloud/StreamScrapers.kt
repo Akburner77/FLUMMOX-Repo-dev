@@ -667,34 +667,31 @@ suspend fun resolveWrapper(url: String, depth: Int = 0): String? {
     doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='gdflix']")?.attr("href")?.let { return it }
 
-    // Meta refresh redirect (hubdrive / hubcdn)
-    doc.selectFirst("meta[http-equiv=refresh]")?.attr("content")?.let { content ->
-        Regex("""url=([^"'>\s]+)""", RegexOption.IGNORE_CASE).find(content)?.groupValues?.get(1)?.let {
-            val next = when {
-                it.startsWith("//") -> "https:$it"
-                it.startsWith("/") -> "https://${java.net.URI(url).host}$it"
-                else -> it
-            }
-            return resolveWrapper(next)
-        }
-    }
-
-    // JS window.location redirect
-    val jsRedirect = Regex("""(?:window\.location|location\.href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+    // hubcdn.wiki/file/X style: JS sets `var reurl = "https://decoy/?r=<b64>"`
+    // b64 payload decodes to https://hubcdn.club/dl/?link=<R2 URL>
+    val reurl = Regex("""var\s+reurl\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
         .find(doc.html())?.groupValues?.get(1)
-    if (!jsRedirect.isNullOrBlank()) {
-        val next = when {
-            jsRedirect.startsWith("//") -> "https:$jsRedirect"
-            jsRedirect.startsWith("/") -> "https://${java.net.URI(url).host}$jsRedirect"
-            else -> jsRedirect
+    if (!reurl.isNullOrBlank()) {
+        val b64 = Regex("""[?&]r=([A-Za-z0-9+/=_-]+)""").find(reurl)?.groupValues?.get(1)
+        if (!b64.isNullOrBlank()) {
+            try {
+                val normalized = b64.replace('-', '+').replace('_', '/')
+                val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+                val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT)).trim()
+                if (decoded.startsWith("http")) {
+                    BCLog.d("resolveWrapper reurl → ${decoded.take(80)}")
+                    return decoded
+                }
+            } catch (e: Exception) {
+                BCLog.e("resolveWrapper reurl decode failed: ${e.message}")
+            }
         }
-        return resolveWrapper(next)
     }
 
-        BCLog.v("resolveWrapper HTML for ${url.take(60)}: ${doc.html().take(2000)}")
-        BCLog.d("resolveWrapper no-match: ${url.take(80)}")
-        return null
-    }
+    BCLog.v("resolveWrapper HTML for ${url.take(60)}: ${doc.html().take(2000)}")
+    BCLog.d("resolveWrapper no-match: ${url.take(80)}")
+    return null
+}
 
 // ═══════════════════════════════════════════
 // ── Entry point ──
