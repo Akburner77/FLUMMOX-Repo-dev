@@ -7,13 +7,13 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
-override fun load(context: Context) {
-    com.flummox.bingecore.RepoAnalytics.ping(context, "BingeCloud")
-    BingeCloudCtx.context = context
-       BingeCloudCtx.context = context
-       BCLog.init(context)
-       BCLog.setVerbose(Settings.isVerboseLog())
-       HostHealth.init(context)
+class BingeCloudPlugin : Plugin() {
+    override fun load(context: Context) {
+        com.flummox.bingecore.RepoAnalytics.ping(context, "BingeCloud")
+        BingeCloudCtx.context = context
+        BCLog.init(context)
+        BCLog.setVerbose(Settings.isVerboseLog())
+        HostHealth.init(context)
         BCLog.section("BingeCloud boot")
         BCLog.d("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
         BCLog.d("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
@@ -25,6 +25,7 @@ override fun load(context: Context) {
         registerExtractorAPI(VCloud())
         registerExtractorAPI(GDirect())
         registerExtractorAPI(Filepress())
+        registerExtractorAPI(GogoCdn())
 
         this.openSettings = { ctx: Context ->
             Settings.showSettingsDialog(ctx) {
