@@ -242,7 +242,7 @@ suspend fun sbFileList(shareKey: String, parentId: Long? = null): JSONArray? {
         "$SB_FEBBOX/file/file_share_list?share_key=$shareKey&parent_id=$parentId&page=1"
     else
         "$SB_FEBBOX/file/file_share_list?share_key=$shareKey"
-        return try {
+    return try {
         val json = app.get(url, headers = mapOf("Accept-Language" to "en")).text
         val root = JSONObject(json)
         val data = root.optJSONObject("data")
