@@ -749,14 +749,23 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
     } ?: run { BCLog.d("MB timeout"); emptyList() }
 })
         if (Settings.isSrcAnikoto()) jobs.add(async {
-            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
-                try {
-                    com.flummox.bingecore.SpeedBooster.deduped("anikoto:${q.cacheKey()}") {
-                        anikotoExtractRaw(q)
-                    }
-                } catch (e: Exception) { BCLog.e("AniKoto task failed: ${e.message}"); emptyList() }
-            } ?: run { BCLog.d("AniKoto timeout"); emptyList() }
-        })
+    kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+        try {
+            com.flummox.bingecore.SpeedBooster.deduped("anikoto:${q.cacheKey()}") {
+                anikotoExtractRaw(q)
+            }
+        } catch (e: Exception) { BCLog.e("AniKoto task failed: ${e.message}"); emptyList() }
+    } ?: run { BCLog.d("AniKoto timeout"); emptyList() }
+})
+if (Settings.isSrcShowBox()) jobs.add(async {
+    kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+        try {
+            com.flummox.bingecore.SpeedBooster.deduped("showbox:${q.cacheKey()}") {
+                showBoxExtractRaw(q)
+            }
+        } catch (e: Exception) { BCLog.e("ShowBox task failed: ${e.message}"); emptyList() }
+    } ?: run { BCLog.d("ShowBox timeout"); emptyList() }
+})
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
         val all = jobs.awaitAll().filterNotNull().flatten()
@@ -765,7 +774,8 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         val hdh = all.count { it.source == "HDH" }
         val mb = all.count { it.source == "MB" }
         val ak = all.count { it.source == "ANIKOTO" }
-        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb ANIKOTO=$ak total=${all.size}")
+        val sb = all.count { it.source == "SHOWBOX" }
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb ANIKOTO=$ak SHOWBOX=$sb total=${all.size}")
         all
     }
 }
