@@ -1369,19 +1369,18 @@ private val DEFAULT_ON_ROWS = setOf(
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
                 .apply { leftMargin = dp(ctx, 8) }
             setOnClickListener {
-                val cookie = CookieManager.getInstance().getCookie("https://www.febbox.com") ?: ""
-                val ui = cookie.split(";").map { it.trim() }
-                    .firstOrNull { it.startsWith("ui=") }
-                    ?.substringAfter("ui=")?.trim()
-                if (ui.isNullOrBlank()) {
-                    Toast.makeText(ctx, "Not signed in yet — complete login first",
-                        Toast.LENGTH_SHORT).show()
-                } else {
-                    saveFebBoxToken(ui)
-                    Toast.makeText(ctx, "✓ Signed in", Toast.LENGTH_SHORT).show()
-                    dlg.dismiss()
-                    onSaved()
-                }
+            val cookie = CookieManager.getInstance().getCookie("https://www.febbox.com") ?: ""
+            val hasUi = cookie.split(";").any { it.trim().startsWith("ui=") }
+    if (!hasUi) {
+        Toast.makeText(ctx, "Not signed in yet — complete login first",
+            Toast.LENGTH_SHORT).show()
+    } else {
+        // save full cookie string — FebBox file_download needs all of it, not just ui
+        saveFebBoxToken(cookie)
+        Toast.makeText(ctx, "✓ Signed in", Toast.LENGTH_SHORT).show()
+        dlg.dismiss()
+        onSaved()
+    }
             }
         })
         layout.addView(bar)
