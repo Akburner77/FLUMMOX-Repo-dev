@@ -25,6 +25,9 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import kotlin.random.Random
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+
 
 private const val SB_IV = "wEiphTn!"
 private const val SB_KEY = "123d6cedf626dy54233aa1w6"
@@ -350,13 +353,13 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         candidates.add(Cand(name, fid, inlinePath, quality, size))
     }
 
-    val resolved = kotlinx.coroutines.coroutineScope {
-        candidates.map { c ->
-            kotlinx.coroutines.async {
-                val url = c.inlinePath ?: if (c.fid > 0) sbGetDownloadUrl(shareKey, c.fid) else null
-                c to url
-            }
-        }.map { it.await() }
+    val resolved = coroutineScope {
+    candidates.map { c ->
+        async {
+            val url = c.inlinePath ?: if (c.fid > 0) sbGetDownloadUrl(shareKey, c.fid) else null
+            c to url
+        }
+    }.map { it.await() } 
     }
 
     val out = mutableListOf<ScrapedMirror>()
