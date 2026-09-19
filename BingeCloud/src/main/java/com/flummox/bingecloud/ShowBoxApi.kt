@@ -275,8 +275,7 @@ suspend fun sbFileList(shareKey: String, parentId: Long? = null): JSONArray? {
 }
 
 // ── fetch direct download URL for a given fid ──
-// When FebBox returns code=1 but the file URL key is unknown,
-// the raw body dump reveals the correct field name.
+// Response shape: {"code":1,"msg":"success","data":[{"download_url":"...","path":"...",...}]}
 suspend fun sbGetDownloadUrl(shareKey: String, fid: Long): String? {
     val url = "$SB_FEBBOX/file/file_download?fid=$fid&share_key=$shareKey"
     return try {
@@ -287,32 +286,11 @@ suspend fun sbGetDownloadUrl(shareKey: String, fid: Long): String? {
             BCLog.d("ShowBox dl fid=$fid code=$code msg=${root.optString("msg").take(80)}")
             return null
         }
-        // data is an ARRAY of file entries
         val arr = root.optJSONArray("data")
         val entry = arr?.optJSONObject(0)
         val dl = entry?.optString("download_url")?.takeIf { it.isNotBlank() }
         if (dl != null) BCLog.d("ShowBox dl fid=$fid → ${dl.take(100)}")
         else BCLog.d("ShowBox dl fid=$fid: no download_url in data[0]")
-        dl
-    } catch (e: Exception) {
-        BCLog.e("ShowBox dl fid=$fid fail: ${e.message}"); null
-    }
-}
-
-        // Probe every plausible field name
-        val dl = data?.optString("download_url")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("url")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("path")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("link")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("file_url")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("src")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("play_url")?.takeIf { it.isNotBlank() }
-            ?: data?.optString("download")?.takeIf { it.isNotBlank() }
-            ?: root.optString("download_url").takeIf { it.isNotBlank() }
-            ?: root.optString("url").takeIf { it.isNotBlank() }
-
-        if (dl != null) BCLog.d("ShowBox dl fid=$fid → ${dl.take(100)}")
-        else BCLog.d("ShowBox dl fid=$fid: no URL field matched")
         dl
     } catch (e: Exception) {
         BCLog.e("ShowBox dl fid=$fid fail: ${e.message}"); null
@@ -363,7 +341,6 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         }
         val fid = f.optLong("fid", 0L)
         var path = f.optString("path").takeIf { it.isNotBlank() }
-        // fallback when FebBox blanks "path" (anonymous or non-VIP)
         if (path == null && fid > 0) {
             path = sbGetDownloadUrl(shareKey, fid)
         }
