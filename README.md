@@ -38,6 +38,8 @@ Your all-in-one streaming companion — built for speed, reliability, and a clea
 - 🎯 **Smart Link Ranking** — Mirrors are scored by URL type, source reliability, and live host reputation, then color-coded 🟢🟡🔴 for instant quality assessment. Unique to BingeCloud.
 - ❤️ **Host Health Memory** — Host reliability is tracked across sessions; failing hosts are demoted and recover automatically on success. Unique to BingeCloud.
 - ⚡ **Instant Search & Fast Loads** — Find any title in seconds, with all available streams fetched simultaneously in a single clean list.
+- 📺 **Streaming Platforms** — Browse Netflix, Prime Video, Disney+, Max, Apple TV+, JioHotstar, JioCinema, SonyLIV, ZEE5 catalogs directly.
+
 
 ---
 
@@ -48,6 +50,11 @@ Your all-in-one streaming companion — built for speed, reliability, and a clea
 - **GitHub Actions**
 
 ---
+
+## 📊 Usage Statistics
+
+BingeCloud collects anonymous usage counts to help improve the extension.
+No personal data, watch history, or device information is ever collected.
 
 ## 🐛 Bug Reports & Requests
 
