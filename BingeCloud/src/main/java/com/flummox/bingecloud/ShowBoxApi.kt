@@ -280,6 +280,8 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val shareKey = sbExternalShareKey(subject.id, subject.boxType) ?: return emptyList()
     var fileList = sbFileList(shareKey) ?: return emptyList()
     BCLog.d("ShowBox top-level: ${fileList.length()} entries, type=${q.type}, season=${q.season}")
+
+    if (q.type == "series" && q.season > 0) {
         var seasonFid: Long? = null
         for (i in 0 until fileList.length()) {
             val f = fileList.optJSONObject(i) ?: continue
