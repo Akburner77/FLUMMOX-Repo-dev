@@ -468,10 +468,20 @@ private fun arrowButtonBg(ctx: Context): RippleDrawable = withRipple(
         var length: Float, var alpha: Float,
         var thickness: Float, var age: Float, var lifespan: Float
     )
+    // Genshin-style spark orbiting near the head
+    private data class Spark(
+        var angle: Float,
+        var radius: Float,
+        var speed: Float,
+        var size: Float,
+        var hue: Int   // 0 = white, 1 = pale purple
+    )
     private val stars = mutableListOf<Star>()
+    private val sparks = mutableListOf<Spark>()
     private val tailPath = Path()
     private val tailPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val headPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sparkPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rnd = java.util.Random()
     private var lastNs = 0L
 
@@ -484,24 +494,37 @@ private fun arrowButtonBg(ctx: Context): RippleDrawable = withRipple(
             else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
         lastNs = now
 
-        // Rare spawn, Genshin-paced: slower drift, longer tail, brighter glow
-        if (rnd.nextFloat() < 0.006f && stars.size < 2) {
+        // ── Spawn: only one star onscreen at a time ──
+        if (rnd.nextFloat() < 0.006f && stars.isEmpty()) {
             val angleDeg = 25f + rnd.nextFloat() * 30f
             val rad = Math.toRadians(angleDeg.toDouble())
-            val speed = 240f + rnd.nextFloat() * 160f
+            val speed = 260f + rnd.nextFloat() * 180f
             val startX = width * (0.5f + rnd.nextFloat() * 0.7f)
-            val startY = -30f + rnd.nextFloat() * (height * 0.5f)
+            val startY = -40f + rnd.nextFloat() * (height * 0.5f)
+            val thickness = 3.5f + rnd.nextFloat() * 2.0f
             stars.add(Star(
                 x = startX,
                 y = startY,
                 vx = (-Math.cos(rad) * speed).toFloat(),
                 vy = (Math.sin(rad) * speed).toFloat(),
-                length = 140f + rnd.nextFloat() * 160f,
-                alpha = 0.9f + rnd.nextFloat() * 0.1f,
-                thickness = 1.2f + rnd.nextFloat() * 1.0f,
+                length = 200f + rnd.nextFloat() * 180f,
+                alpha = 1.0f,
+                thickness = thickness,
                 age = 0f,
-                lifespan = 1.4f + rnd.nextFloat() * 0.9f
+                lifespan = 1.8f + rnd.nextFloat() * 0.8f
             ))
+            // Genshin sparks: 4 small particles orbiting near the head
+            sparks.clear()
+            val sparkCount = 4
+            for (i in 0 until sparkCount) {
+                sparks.add(Spark(
+                    angle = rnd.nextFloat() * 360f,
+                    radius = thickness * (2.5f + rnd.nextFloat() * 2.5f),
+                    speed = 180f + rnd.nextFloat() * 140f,
+                    size = thickness * (0.5f + rnd.nextFloat() * 0.6f),
+                    hue = if (rnd.nextFloat() < 0.5f) 0 else 1
+                ))
+            }
         }
 
         val iter = stars.iterator()
@@ -511,13 +534,15 @@ private fun arrowButtonBg(ctx: Context): RippleDrawable = withRipple(
             s.y += s.vy * dt
             s.age += dt
 
-            if (s.age > s.lifespan || s.x < -300f || s.x > width + 300f || s.y > height + 100f) {
-                iter.remove(); continue
+            if (s.age > s.lifespan || s.x < -320f || s.x > width + 320f || s.y > height + 120f) {
+                iter.remove()
+                sparks.clear()
+                continue
             }
 
             val lifeFrac = (s.age / s.lifespan).coerceIn(0f, 1f)
             val fadeIn = (lifeFrac / 0.12f).coerceIn(0f, 1f)
-            val fadeOut = ((1f - lifeFrac) / 0.5f).coerceIn(0f, 1f)
+            val fadeOut = ((1f - lifeFrac) / 0.45f).coerceIn(0f, 1f)
             val fade = fadeIn * fadeOut
             val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
 
@@ -528,59 +553,73 @@ private fun arrowButtonBg(ctx: Context): RippleDrawable = withRipple(
             val tipY = s.y - uy * s.length
             val px = -uy
             val py = ux
-            val headHalf = s.thickness * 1.6f
+            val headHalf = s.thickness * 2.4f
 
-            // ── Tapered tail as filled path, gradient head→tip ──
+            // ── Tapered tail — purple → pink → white gradient, head brightest ──
             tailPath.reset()
             tailPath.moveTo(s.x + px * headHalf, s.y + py * headHalf)
             tailPath.lineTo(tipX, tipY)
             tailPath.lineTo(s.x - px * headHalf, s.y - py * headHalf)
             tailPath.close()
 
+            // Three-stop gradient: white head → pale pink → purple tip → transparent
             tailPaint.shader = android.graphics.LinearGradient(
                 s.x, s.y, tipX, tipY,
-                Color.argb(a, 255, 255, 255),
-                Color.argb(0, 190, 215, 255),
+                intArrayOf(
+                    Color.argb(a, 255, 235, 255),      // white-pink at head
+                    Color.argb((a * 0.7f).toInt(), 220, 170, 255),  // mid purple-pink
+                    Color.argb((a * 0.35f).toInt(), 170, 120, 240), // deep purple
+                    Color.argb(0, 150, 100, 220)       // fade out
+                ),
+                floatArrayOf(0f, 0.35f, 0.7f, 1f),
                 Shader.TileMode.CLAMP
             )
             canvas.drawPath(tailPath, tailPaint)
             tailPaint.shader = null
 
-            // ── Glowing head: three layered radial gradients ──
+            // ── Head glow — layered Genshin style ──
+            // Layer 1: outer violet halo
             headPaint.shader = RadialGradient(
-                s.x, s.y, s.thickness * 9f,
-                Color.argb((a * 0.18f).toInt(), 200, 225, 255),
-                Color.argb(0, 200, 225, 255),
+                s.x, s.y, s.thickness * 14f,
+                Color.argb((a * 0.35f).toInt(), 190, 140, 255),
+                Color.argb(0, 190, 140, 255),
                 Shader.TileMode.CLAMP
             )
-            canvas.drawCircle(s.x, s.y, s.thickness * 9f, headPaint)
+            canvas.drawCircle(s.x, s.y, s.thickness * 14f, headPaint)
 
+            // Layer 2: mid pink glow
             headPaint.shader = RadialGradient(
-                s.x, s.y, s.thickness * 4f,
-                Color.argb((a * 0.55f).toInt(), 225, 240, 255),
-                Color.argb(0, 225, 240, 255),
+                s.x, s.y, s.thickness * 7f,
+                Color.argb((a * 0.65f).toInt(), 255, 200, 250),
+                Color.argb(0, 255, 200, 250),
                 Shader.TileMode.CLAMP
             )
-            canvas.drawCircle(s.x, s.y, s.thickness * 4f, headPaint)
+            canvas.drawCircle(s.x, s.y, s.thickness * 7f, headPaint)
 
+            // Layer 3: bright white core
             headPaint.shader = null
             headPaint.color = Color.argb(a, 255, 255, 255)
-            canvas.drawCircle(s.x, s.y, s.thickness * 1.6f, headPaint)
+            canvas.drawCircle(s.x, s.y, s.thickness * 2.6f, headPaint)
 
-            // ── Sparkle trail behind head ──
-            for (i in 1..2) {
-                val frac = i * 0.22f
-                val sx = s.x - ux * s.length * frac
-                val sy = s.y - uy * s.length * frac
-                val sparkAlpha = (a * (0.5f - frac * 0.5f)).coerceAtLeast(0f).toInt()
-                headPaint.color = Color.argb(sparkAlpha, 255, 255, 255)
-                canvas.drawCircle(sx, sy, s.thickness * 0.7f, headPaint)
+            // ── Sparks orbiting around the head ──
+            for (sp in sparks) {
+                sp.angle += sp.speed * dt
+                val rad = Math.toRadians(sp.angle.toDouble())
+                val sx = s.x + (Math.cos(rad) * sp.radius).toFloat()
+                val sy = s.y + (Math.sin(rad) * sp.radius).toFloat()
+                val sparkColor = if (sp.hue == 0) {
+                    Color.argb((a * 0.9f).toInt(), 255, 255, 255)
+                } else {
+                    Color.argb((a * 0.85f).toInt(), 220, 180, 255)
+                }
+                sparkPaint.color = sparkColor
+                canvas.drawCircle(sx, sy, sp.size, sparkPaint)
             }
         }
         postInvalidateOnAnimation()
     }
-}
-
+    }
+    
 // ══════════════════════════════════════════════════════════
 // ── NIGHT CLOUDS ──
 // Translucent soft clouds drifting right→left.
@@ -603,7 +642,7 @@ private class NightCloudsView(context: Context) : View(context) {
     init { setWillNotDraw(false) }
 
     private fun spawnCloud(offscreen: Boolean) {
-        val w = 90f + rnd.nextFloat() * 130f
+        val w = 135f + rnd.nextFloat() * 195f
         val h = w * (0.32f + rnd.nextFloat() * 0.18f)
         clouds.add(Cloud(
             x = if (offscreen) width + w else rnd.nextFloat() * width,
