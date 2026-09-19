@@ -361,7 +361,7 @@ private val DEFAULT_ON_ROWS = setOf(
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    // ══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════hb═══════════════════
     // ── SHOOTING STARS ──
     // ══════════════════════════════════════════════════════════
     private class ShootingStarsView(context: Context) : View(context) {
