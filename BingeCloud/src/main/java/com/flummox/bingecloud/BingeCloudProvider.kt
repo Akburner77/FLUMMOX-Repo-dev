@@ -379,14 +379,18 @@ val raw: List<AioMeta> = if (isStreaming) {
                                             else -> ExtractorLinkType.VIDEO
                                         }
                                         val display = "$emoji${m.quality} •ShowBox"
-                                        val link = newExtractorLink("ShowBox", display, m.url, linkType) {
-                                            this.referer = "https://www.febbox.com/"
-                                            this.headers = mapOf(
-                                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
-                                                "Referer" to "https://www.febbox.com/",
-                                                "Range" to "bytes=0-"
+                                         val link = newExtractorLink("ShowBox", display, m.url, linkType) {
+                                             this.referer = "https://www.febbox.com/"
+                                             val hdrs = mutableMapOf(
+                                             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                                             "Referer" to "https://www.febbox.com/"
                                              )
-                                       }
+                                            val cookie = Settings.getFebBoxToken()
+                                            if (cookie.isNotBlank()) {
+                                            hdrs["Cookie"] = if (cookie.contains("=")) cookie else "ui=$cookie"
+                                            }
+                                            this.headers = hdrs
+                                         }
                                        callback.invoke(link)
                                        emittedCount.incrementAndGet()
                                        HostHealth.recordSuccess("febbox.local")
