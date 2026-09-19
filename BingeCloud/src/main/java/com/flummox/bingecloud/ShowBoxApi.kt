@@ -277,10 +277,23 @@ suspend fun sbFileList(shareKey: String, parentId: Long? = null): JSONArray? {
     }
 }
 
+// ── best-effort local IPv4 so FebBox picks a nearby CDN edge ──
+private fun sbLocalIpv4(): String? = try {
+    java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { addr ->
+            !addr.isLoopbackAddress &&
+            !addr.isLinkLocalAddress &&
+            addr is java.net.Inet4Address
+        }?.hostAddress
+} catch (_: Exception) { null }
+
+
 // ── fetch direct download URL for a given fid ──
 // Response shape: {"code":1,"msg":"success","data":[{"download_url":"...","path":"...",...}]}
 suspend fun sbGetDownloadUrl(shareKey: String, fid: Long): String? {
-    val url = "$SB_FEBBOX/file/file_download?fid=$fid&share_key=$shareKey"
+    val userIp = sbLocalIpv4()?.let { "&user_ip=$it" } ?: ""
+    val url = "$SB_FEBBOX/file/file_download?fid=$fid&share_key=$shareKey$userIp"
     return try {
         val json = app.get(url, headers = sbFebBoxHeaders()).text
         val root = JSONObject(json)
