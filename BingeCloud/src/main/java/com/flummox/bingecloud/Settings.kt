@@ -64,6 +64,7 @@ object Settings {
     const val K_SRC_FEBBOX = "bingecloud_src_febbox"
     const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
     const val K_SRC_ANIKOTO = "bingecloud_src_anikoto"
+    const val K_SRC_SHOWBOX = "bingecloud_src_showbox"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
     const val K_PREFETCH = "bingecloud_prefetch"
@@ -288,6 +289,7 @@ private val DEFAULT_ON_ROWS = setOf(
     fun isSrcFebBox(): Boolean = getKey<Boolean>(K_SRC_FEBBOX) ?: true
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
     fun isSrcAnikoto(): Boolean = getKey<Boolean>(K_SRC_ANIKOTO) ?: true
+    fun isSrcShowBox(): Boolean = getKey<Boolean>(K_SRC_SHOWBOX) ?: true
     // ══════════════════════════════════════════════════════════
     // ── COLORS ──
     // ══════════════════════════════════════════════════════════
@@ -929,16 +931,17 @@ private val DEFAULT_ON_ROWS = setOf(
 
         // ── SOURCES ──
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcAnikoto()).count { it }
+            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcAnikoto(), isSrcShowBox()).count { it }
             val c = buildCard(
-            ctx, "📡", "Sources", "$on of 5 enabled",
-            badge = "$on/5"
+                ctx, "📡", "Sources", "$on of 6 enabled",
+                badge = "$on/6"
             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
             c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
             c.body.addView(toggleRow(ctx, "AniKoto", "Anime only — sub/dub", isSrcAnikoto()) { setKey(K_SRC_ANIKOTO, it) })
+            c.body.addView(toggleRow(ctx, "ShowBox", "FebBox — movies & series", isSrcShowBox()) { setKey(K_SRC_SHOWBOX, it) })
             body.addView(c.root)
         }
 
