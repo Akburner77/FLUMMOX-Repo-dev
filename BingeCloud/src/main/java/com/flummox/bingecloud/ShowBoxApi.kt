@@ -94,6 +94,20 @@ oFuZne+lYcCPMNDXdku6wKdf9gSnOSHOGMu8TvHcud4uIDYmFH5qabJL5GDoQi7Q
 -----END PRIVATE KEY-----
 """
 
+// ── FebBox auth headers ──
+// If user saved a ui cookie via Settings → FebBox Account, include it.
+// Without it, /file/file_share_list returns files with blank "path".
+private fun sbFebBoxHeaders(): Map<String, String> {
+    val base = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+        "Accept" to "application/json, text/plain, */*",
+        "Accept-Language" to "en",
+        "Referer" to "$SB_FEBBOX/"
+    )
+    val ui = Settings.getFebBoxToken()
+    return if (ui.isNotBlank()) base + ("Cookie" to "ui=$ui") else base
+}
+
 private fun sbMd5Hex(input: String): String =
     MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
@@ -226,11 +240,11 @@ suspend fun sbSearch(query: String): List<SBItem> {
 suspend fun sbExternalShareKey(mediaId: Int, boxType: Int): String? {
     val url = "$SB_FEBBOX/mbp/to_share_page?box_type=$boxType&mid=$mediaId&json=1"
     return try {
-        val json = app.get(url).text
+        val json = app.get(url, headers = sbFebBoxHeaders()).text
         val data = JSONObject(json).optJSONObject("data")
         val link = data?.optString("link")?.takeIf { it.isNotBlank() }
             ?: data?.optString("share_link")?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
-        BCLog.d("ShowBox shareKey=$link")
+        BCLog.d("ShowBox shareKey=$link (logged=${Settings.getFebBoxToken().isNotBlank()})")
         link
     } catch (e: Exception) {
         BCLog.e("ShowBox share fail: ${e.message}"); null
@@ -243,7 +257,7 @@ suspend fun sbFileList(shareKey: String, parentId: Long? = null): JSONArray? {
     else
         "$SB_FEBBOX/file/file_share_list?share_key=$shareKey"
     return try {
-        val json = app.get(url, headers = mapOf("Accept-Language" to "en")).text
+        val json = app.get(url, headers = sbFebBoxHeaders()).text
         val root = JSONObject(json)
         val data = root.optJSONObject("data")
         val files = data?.optJSONArray("file_list")
@@ -257,6 +271,29 @@ suspend fun sbFileList(shareKey: String, parentId: Long? = null): JSONArray? {
         files
     } catch (e: Exception) {
         BCLog.e("ShowBox fileList fail: ${e.message}"); null
+    }
+}
+
+// ── fallback: ask FebBox for the download URL of a specific fid ──
+// Used when file_share_list returns blank "path".
+// Requires the ui cookie for actual URL; anonymous calls usually return error JSON.
+suspend fun sbGetDownloadUrl(shareKey: String, fid: Long): String? {
+    val url = "$SB_FEBBOX/file/file_download?fid=$fid&share_key=$shareKey"
+    return try {
+        val json = app.get(url, headers = sbFebBoxHeaders()).text
+        val root = JSONObject(json)
+        if (root.optInt("code", -1) != 0) {
+            BCLog.d("ShowBox dl fid=$fid code=${root.optInt("code")} msg=${root.optString("msg").take(80)}")
+            return null
+        }
+        val data = root.optJSONObject("data")
+        val dl = data?.optString("download_url")?.takeIf { it.isNotBlank() }
+            ?: data?.optString("url")?.takeIf { it.isNotBlank() }
+            ?: data?.optString("path")?.takeIf { it.isNotBlank() }
+        if (dl != null) BCLog.d("ShowBox dl fid=$fid → ${dl.take(80)}")
+        dl
+    } catch (e: Exception) {
+        BCLog.e("ShowBox dl fid=$fid fail: ${e.message}"); null
     }
 }
 
@@ -294,7 +331,7 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         }
     }
 
-    val out = mutableListOf<ScrapedMirror>()
+        val out = mutableListOf<ScrapedMirror>()
     for (i in 0 until fileList.length()) {
         val f = fileList.optJSONObject(i) ?: continue
         val name = f.optString("file_name")
@@ -302,9 +339,20 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
             val pat = Regex("""s0*${q.season}\s*e0*${q.episode}""", RegexOption.IGNORE_CASE)
             if (!pat.containsMatchIn(name)) continue
         }
-        val path = f.optString("path").takeIf { it.isNotBlank() } ?: continue
-        val quality = f.optString("quality").ifBlank { "Auto" }
-        val size = f.optString("size").ifBlank { null }
+        val fid = f.optLong("fid", 0L)
+        var path = f.optString("path").takeIf { it.isNotBlank() }
+        // fallback when FebBox blanks "path" (anonymous or non-VIP)
+        if (path == null && fid > 0) {
+            path = sbGetDownloadUrl(shareKey, fid)
+        }
+        if (path == null) {
+            BCLog.d("ShowBox skip (no path/fid): $name")
+            continue
+        }
+        val quality = f.optString("quality").ifBlank {
+            Regex("""(\d{3,4})[pP]""").find(name)?.groupValues?.get(1)?.plus("p") ?: "Auto"
+        }
+        val size = f.optString("file_size").ifBlank { f.optString("size").ifBlank { null } }
         val label = "ShowBox $quality${if (size != null) " [$size]" else ""}"
         out.add(ScrapedMirror(quality, label, path.replace("\\/", "/"), "SHOWBOX"))
     }
