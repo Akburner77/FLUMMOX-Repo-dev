@@ -331,7 +331,9 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         }
     }
 
-    val out = mutableListOf<ScrapedMirror>()
+        // collect candidates first, then resolve all download URLs in parallel
+    data class Cand(val name: String, val fid: Long, val inlinePath: String?, val quality: String, val size: String?)
+    val candidates = mutableListOf<Cand>()
     for (i in 0 until fileList.length()) {
         val f = fileList.optJSONObject(i) ?: continue
         val name = f.optString("file_name")
@@ -340,20 +342,31 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
             if (!pat.containsMatchIn(name)) continue
         }
         val fid = f.optLong("fid", 0L)
-        var path = f.optString("path").takeIf { it.isNotBlank() }
-        if (path == null && fid > 0) {
-            path = sbGetDownloadUrl(shareKey, fid)
-        }
-        if (path == null) {
-            BCLog.d("ShowBox skip (no path/fid): $name")
-            continue
-        }
+        val inlinePath = f.optString("path").takeIf { it.isNotBlank() }
         val quality = f.optString("quality").ifBlank {
             Regex("""(\d{3,4})[pP]""").find(name)?.groupValues?.get(1)?.plus("p") ?: "Auto"
         }
         val size = f.optString("file_size").ifBlank { f.optString("size").ifBlank { null } }
-        val label = "ShowBox $quality${if (size != null) " [$size]" else ""}"
-        out.add(ScrapedMirror(quality, label, path.replace("\\/", "/"), "SHOWBOX"))
+        candidates.add(Cand(name, fid, inlinePath, quality, size))
+    }
+
+    val resolved = kotlinx.coroutines.coroutineScope {
+        candidates.map { c ->
+            kotlinx.coroutines.async {
+                val url = c.inlinePath ?: if (c.fid > 0) sbGetDownloadUrl(shareKey, c.fid) else null
+                c to url
+            }
+        }.map { it.await() }
+    }
+
+    val out = mutableListOf<ScrapedMirror>()
+    for ((c, url) in resolved) {
+        if (url == null) {
+            BCLog.d("ShowBox skip (no path/fid): ${c.name}")
+            continue
+        }
+        val label = "ShowBox ${c.quality}${if (c.size != null) " [${c.size}]" else ""}"
+        out.add(ScrapedMirror(c.quality, label, url.replace("\\/", "/"), "SHOWBOX"))
     }
     BCLog.d("ShowBox: ${out.size} mirrors")
     return out
