@@ -281,20 +281,23 @@ suspend fun sbGetDownloadUrl(shareKey: String, fid: Long): String? {
     val url = "$SB_FEBBOX/file/file_download?fid=$fid&share_key=$shareKey"
     return try {
         val json = app.get(url, headers = sbFebBoxHeaders()).text
-        BCLog.d("ShowBox dl raw fid=$fid: ${json.take(600)}")
-
         val root = JSONObject(json)
-        // FebBox uses code=1 for success in some endpoints, code=0 in others
         val code = root.optInt("code", -1)
         if (code != 0 && code != 1) {
             BCLog.d("ShowBox dl fid=$fid code=$code msg=${root.optString("msg").take(80)}")
             return null
         }
-
-        val data = root.optJSONObject("data")
-        if (data != null) {
-            BCLog.d("ShowBox dl data keys fid=$fid: ${data.keys().asSequence().toList()}")
-        }
+        // data is an ARRAY of file entries
+        val arr = root.optJSONArray("data")
+        val entry = arr?.optJSONObject(0)
+        val dl = entry?.optString("download_url")?.takeIf { it.isNotBlank() }
+        if (dl != null) BCLog.d("ShowBox dl fid=$fid → ${dl.take(100)}")
+        else BCLog.d("ShowBox dl fid=$fid: no download_url in data[0]")
+        dl
+    } catch (e: Exception) {
+        BCLog.e("ShowBox dl fid=$fid fail: ${e.message}"); null
+    }
+}
 
         // Probe every plausible field name
         val dl = data?.optString("download_url")?.takeIf { it.isNotBlank() }
