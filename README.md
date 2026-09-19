@@ -56,6 +56,8 @@ Your all-in-one streaming companion — built for speed, reliability, and a clea
 BingeCloud collects anonymous usage counts to help improve the extension.
 No personal data, watch history, or device information is ever collected.
 
+---
+
 ## 🐛 Bug Reports & Requests
 
 Found a broken link or a bug? Open an [Issue](https://github.com/FlummoxGamer/FLUMMOX-Repo/issues) with:
