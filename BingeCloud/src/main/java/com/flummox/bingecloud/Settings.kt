@@ -5,13 +5,20 @@ import android.app.AlertDialog
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.ColorStateList
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.graphics.Path
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.text.TextUtils
+import android.transition.AutoTransition
+import android.transition.TransitionManager
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -23,6 +30,8 @@ import android.webkit.WebViewClient
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.text.InputType
+import android.widget.EditText
 import android.widget.CompoundButton
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -246,6 +255,83 @@ private val DEFAULT_ON_ROWS = setOf(
     dlg.show()
 }
 
+    private fun showPasteTokenDialog(ctx: Context, onSaved: () -> Unit) {
+    val dlg = AlertDialog.Builder(ctx).create()
+    val root = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        background = cardBg(ctx)
+        setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
+    }
+    root.addView(TextView(ctx).apply {
+        text = "✏️  Paste FebBox Token"
+        setTextColor(TEXT)
+        textSize = 17f
+        setTypeface(typeface, Typeface.BOLD)
+    })
+    root.addView(TextView(ctx).apply {
+        text = "Paste the cookie from febbox.com. Either the raw ui value or the full cookie string works."
+        setTextColor(SUBTEXT)
+        textSize = 13f
+        setPadding(0, dp(ctx, 12), 0, dp(ctx, 16))
+    })
+    val input = EditText(ctx).apply {
+        setTextColor(TEXT)
+        setHintTextColor(SUBTEXT)
+        hint = "ui=... or raw value"
+        textSize = 14f
+        background = bg(INPUT, 8, ctx)
+        setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
+        maxLines = 3
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    }
+    root.addView(input, LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ))
+    val btnRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.END
+        setPadding(0, dp(ctx, 20), 0, 0)
+    }
+    btnRow.addView(Button(ctx).apply {
+        text = "Cancel"
+        textSize = 14f
+        setTextColor(TEXT)
+        background = bg(ROW, 14, ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        setOnClickListener { dlg.dismiss() }
+    })
+    btnRow.addView(Button(ctx).apply {
+        text = "Save"
+        textSize = 14f
+        setTextColor(0xFF0A0D14.toInt())
+        background = saveButtonBg(ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { leftMargin = dp(ctx, 8) }
+        setOnClickListener {
+            val raw = input.text?.toString()?.trim().orEmpty()
+            if (raw.isBlank()) {
+                Toast.makeText(ctx, "Token is empty", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            saveFebBoxToken(raw)
+            Toast.makeText(ctx, "✓ Token saved", Toast.LENGTH_SHORT).show()
+            dlg.dismiss()
+            onSaved()
+        }
+    })
+    root.addView(btnRow)
+    dlg.setView(root)
+    dlg.window?.setBackgroundDrawable(cardBg(ctx))
+    dlg.show()
+}
+
     // ── basic prefs ──
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 50).coerceIn(1, 50)
     fun isPrefilterEnabled(): Boolean = getKey<Boolean>(K_PREFILTER) ?: true
@@ -337,29 +423,40 @@ private val DEFAULT_ON_ROWS = setOf(
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    private fun accentPill(ctx: Context): GradientDrawable = GradientDrawable().apply {
+    private fun withRipple(shape: GradientDrawable, rippleColor: Int = 0x40FFFFFF): RippleDrawable =
+    RippleDrawable(ColorStateList.valueOf(rippleColor), shape, shape)
+
+private fun accentPill(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable().apply {
         setColor(ACCENT_BG)
         cornerRadius = dp(ctx, 20).toFloat()
         setStroke(dp(ctx, 1), 0x337DD3FC)
     }
+)
 
-    private fun saveButtonBg(ctx: Context): GradientDrawable =
-        GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            intArrayOf(SAVE_GRAD_TOP, SAVE_GRAD_BOTTOM)
-        ).apply { cornerRadius = dp(ctx, 14).toFloat() }
+private fun saveButtonBg(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable(
+        GradientDrawable.Orientation.TL_BR,
+        intArrayOf(SAVE_GRAD_TOP, SAVE_GRAD_BOTTOM)
+    ).apply { cornerRadius = dp(ctx, 14).toFloat() },
+    rippleColor = 0x50FFFFFF
+)
 
-    private fun cancelButtonBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
+private fun cancelButtonBg(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable().apply {
         setColor(0xFF000000.toInt())
         cornerRadius = dp(ctx, 14).toFloat()
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
+)
 
-    private fun arrowButtonBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
+private fun arrowButtonBg(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable().apply {
         setColor(ROW)
         cornerRadius = dp(ctx, 8).toFloat()
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
+)
 
     // ═══════════════════════════════════════hb═══════════════════
     // ── SHOOTING STARS ──
@@ -371,8 +468,20 @@ private val DEFAULT_ON_ROWS = setOf(
         var length: Float, var alpha: Float,
         var thickness: Float, var age: Float, var lifespan: Float
     )
+    // Genshin-style spark orbiting near the head
+    private data class Spark(
+        var angle: Float,
+        var radius: Float,
+        var speed: Float,
+        var size: Float,
+        var hue: Int   // 0 = white, 1 = pale purple
+    )
     private val stars = mutableListOf<Star>()
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
+    private val sparks = mutableListOf<Spark>()
+    private val tailPath = Path()
+    private val tailPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val headPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sparkPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rnd = java.util.Random()
     private var lastNs = 0L
 
@@ -385,26 +494,37 @@ private val DEFAULT_ON_ROWS = setOf(
             else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
         lastNs = now
 
-        // Rare spawn — real shooting stars are uncommon
-        if (rnd.nextFloat() < 0.006f && stars.size < 2) {
-            // Natural trajectory: from upper-right, moving down-left
-            // angle below horizontal varies 25°–55°
+        // ── Spawn: only one star onscreen at a time ──
+        if (rnd.nextFloat() < 0.006f && stars.isEmpty()) {
             val angleDeg = 25f + rnd.nextFloat() * 30f
             val rad = Math.toRadians(angleDeg.toDouble())
-            val speed = 340f + rnd.nextFloat() * 260f
+            val speed = 260f + rnd.nextFloat() * 180f
             val startX = width * (0.5f + rnd.nextFloat() * 0.7f)
-            val startY = -30f + rnd.nextFloat() * (height * 0.5f)
+            val startY = -40f + rnd.nextFloat() * (height * 0.5f)
+            val thickness = 3.5f + rnd.nextFloat() * 2.0f
             stars.add(Star(
                 x = startX,
                 y = startY,
                 vx = (-Math.cos(rad) * speed).toFloat(),
                 vy = (Math.sin(rad) * speed).toFloat(),
-                length = 100f + rnd.nextFloat() * 120f,
-                alpha = 0.75f + rnd.nextFloat() * 0.25f,
-                thickness = 1.0f + rnd.nextFloat() * 1.1f,
+                length = 200f + rnd.nextFloat() * 180f,
+                alpha = 1.0f,
+                thickness = thickness,
                 age = 0f,
-                lifespan = 1.0f + rnd.nextFloat() * 0.8f
+                lifespan = 1.8f + rnd.nextFloat() * 0.8f
             ))
+            // Genshin sparks: 4 small particles orbiting near the head
+            sparks.clear()
+            val sparkCount = 4
+            for (i in 0 until sparkCount) {
+                sparks.add(Spark(
+                    angle = rnd.nextFloat() * 360f,
+                    radius = thickness * (2.5f + rnd.nextFloat() * 2.5f),
+                    speed = 180f + rnd.nextFloat() * 140f,
+                    size = thickness * (0.5f + rnd.nextFloat() * 0.6f),
+                    hue = if (rnd.nextFloat() < 0.5f) 0 else 1
+                ))
+            }
         }
 
         val iter = stars.iterator()
@@ -414,51 +534,188 @@ private val DEFAULT_ON_ROWS = setOf(
             s.y += s.vy * dt
             s.age += dt
 
-            if (s.age > s.lifespan || s.x < -260f || s.x > width + 260f || s.y > height + 80f) {
-                iter.remove(); continue
+            if (s.age > s.lifespan || s.x < -320f || s.x > width + 320f || s.y > height + 120f) {
+                iter.remove()
+                sparks.clear()
+                continue
             }
 
-            // Fade in first 15%, hold, fade out last 45%
             val lifeFrac = (s.age / s.lifespan).coerceIn(0f, 1f)
-            val fadeIn = (lifeFrac / 0.15f).coerceIn(0f, 1f)
+            val fadeIn = (lifeFrac / 0.12f).coerceIn(0f, 1f)
             val fadeOut = ((1f - lifeFrac) / 0.45f).coerceIn(0f, 1f)
             val fade = fadeIn * fadeOut
             val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
 
-            // Tail endpoint
             val speedMag = Math.hypot(s.vx.toDouble(), s.vy.toDouble()).toFloat().coerceAtLeast(1f)
-            val tx = s.x - (s.vx / speedMag) * s.length
-            val ty = s.y - (s.vy / speedMag) * s.length
+            val ux = s.vx / speedMag
+            val uy = s.vy / speedMag
+            val tipX = s.x - ux * s.length
+            val tipY = s.y - uy * s.length
+            val px = -uy
+            val py = ux
+            val headHalf = s.thickness * 2.4f
 
-            // Tail — gradient shader, bright at head fading to transparent
-            val tailShader = android.graphics.LinearGradient(
-                s.x, s.y, tx, ty,
-                Color.argb(a, 235, 245, 255),
-                Color.argb(0, 200, 235, 255),
-                android.graphics.Shader.TileMode.CLAMP
+            // ── Tapered tail — purple → pink → white gradient, head brightest ──
+            tailPath.reset()
+            tailPath.moveTo(s.x + px * headHalf, s.y + py * headHalf)
+            tailPath.lineTo(tipX, tipY)
+            tailPath.lineTo(s.x - px * headHalf, s.y - py * headHalf)
+            tailPath.close()
+
+            // Three-stop gradient: white head → pale pink → purple tip → transparent
+            tailPaint.shader = android.graphics.LinearGradient(
+                s.x, s.y, tipX, tipY,
+                intArrayOf(
+                    Color.argb(a, 255, 235, 255),      // white-pink at head
+                    Color.argb((a * 0.7f).toInt(), 220, 170, 255),  // mid purple-pink
+                    Color.argb((a * 0.35f).toInt(), 170, 120, 240), // deep purple
+                    Color.argb(0, 150, 100, 220)       // fade out
+                ),
+                floatArrayOf(0f, 0.35f, 0.7f, 1f),
+                Shader.TileMode.CLAMP
             )
-            paint.shader = tailShader
-            paint.strokeWidth = s.thickness
-            canvas.drawLine(s.x, s.y, tx, ty, paint)
-            paint.shader = null
+            canvas.drawPath(tailPath, tailPaint)
+            tailPaint.shader = null
 
-            // Soft layered glow around head (no BlurMaskFilter — hardware canvas compatible)
-            paint.color = Color.argb((a * 0.15f).toInt(), 180, 220, 255)
-            paint.strokeWidth = s.thickness * 4.5f
-            canvas.drawPoint(s.x, s.y, paint)
+            // ── Head glow — layered Genshin style ──
+            // Layer 1: outer violet halo
+            headPaint.shader = RadialGradient(
+                s.x, s.y, s.thickness * 14f,
+                Color.argb((a * 0.35f).toInt(), 190, 140, 255),
+                Color.argb(0, 190, 140, 255),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(s.x, s.y, s.thickness * 14f, headPaint)
 
-            paint.color = Color.argb((a * 0.35f).toInt(), 200, 235, 255)
-            paint.strokeWidth = s.thickness * 2.4f
-            canvas.drawPoint(s.x, s.y, paint)
+            // Layer 2: mid pink glow
+            headPaint.shader = RadialGradient(
+                s.x, s.y, s.thickness * 7f,
+                Color.argb((a * 0.65f).toInt(), 255, 200, 250),
+                Color.argb(0, 255, 200, 250),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(s.x, s.y, s.thickness * 7f, headPaint)
 
-            // Bright core head
-            paint.color = Color.argb(a, 255, 255, 255)
-            paint.strokeWidth = s.thickness * 1.3f
-            canvas.drawPoint(s.x, s.y, paint)
+            // Layer 3: bright white core
+            headPaint.shader = null
+            headPaint.color = Color.argb(a, 255, 255, 255)
+            canvas.drawCircle(s.x, s.y, s.thickness * 2.6f, headPaint)
+
+            // ── Sparks orbiting around the head ──
+            for (sp in sparks) {
+                sp.angle += sp.speed * dt
+                val rad = Math.toRadians(sp.angle.toDouble())
+                val sx = s.x + (Math.cos(rad) * sp.radius).toFloat()
+                val sy = s.y + (Math.sin(rad) * sp.radius).toFloat()
+                val sparkColor = if (sp.hue == 0) {
+                    Color.argb((a * 0.9f).toInt(), 255, 255, 255)
+                } else {
+                    Color.argb((a * 0.85f).toInt(), 220, 180, 255)
+                }
+                sparkPaint.color = sparkColor
+                canvas.drawCircle(sx, sy, sp.size, sparkPaint)
+            }
         }
         postInvalidateOnAnimation()
     }
     }
+    
+// ══════════════════════════════════════════════════════════
+// ── NIGHT CLOUDS ──
+// Translucent soft clouds drifting right→left.
+// Runs behind shooting stars inside the header.
+// ══════════════════════════════════════════════════════════
+private class NightCloudsView(context: Context) : View(context) {
+    private data class Cloud(
+        var x: Float, var y: Float,
+        var speed: Float,
+        var width: Float,
+        var height: Float,
+        var alpha: Float,
+        var seed: Int
+    )
+    private val clouds = mutableListOf<Cloud>()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rnd = java.util.Random()
+    private var lastNs = 0L
+
+    init { setWillNotDraw(false) }
+
+    private fun spawnCloud(offscreen: Boolean) {
+        val w = 135f + rnd.nextFloat() * 195f
+        val h = w * (0.32f + rnd.nextFloat() * 0.18f)
+        clouds.add(Cloud(
+            x = if (offscreen) width + w else rnd.nextFloat() * width,
+            y = height * (0.28f + rnd.nextFloat() * 0.55f),
+            speed = 4f + rnd.nextFloat() * 8f,
+            width = w,
+            height = h,
+            alpha = 0.55f + rnd.nextFloat() * 0.3f,
+            seed = rnd.nextInt(1000)
+        ))
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (clouds.isEmpty() && w > 0) {
+            spawnCloud(false)
+            spawnCloud(true)
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val now = System.nanoTime()
+        val dt = if (lastNs == 0L) 0f
+            else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
+        lastNs = now
+
+        if (clouds.isEmpty() && width > 0) {
+            spawnCloud(false); spawnCloud(true)
+        }
+
+        val iter = clouds.iterator()
+        var pendingSpawn = 0
+        while (iter.hasNext()) {
+            val c = iter.next()
+            c.x -= c.speed * dt
+
+            if (c.x + c.width < -60f) {
+                iter.remove()
+                pendingSpawn++
+                continue
+        }
+
+            // Fade at both edges so clouds don't pop in/out
+            val edgeFade = when {
+                c.x < 0f -> ((c.x + c.width) / c.width).coerceIn(0f, 1f)
+                c.x > width - c.width -> ((width - c.x) / c.width).coerceIn(0f, 1f)
+                else -> 1f
+            }
+
+            // 6 lobes → soft cloud silhouette via radial gradients
+            val lobes = 6
+            val step = c.width / lobes
+            val r = c.height * 0.55f
+            for (i in 0 until lobes) {
+                val n = ((c.seed * (i + 1) * 9301 + 49297) % 233280).toFloat() / 233280f
+                val lr = r * (0.55f + n * 0.6f)
+                val cx = c.x + i * step + step / 2f
+                val cy = c.y + (n - 0.5f) * c.height * 0.35f
+                paint.shader = RadialGradient(
+                    cx, cy, lr * 1.6f,
+                    Color.argb((c.alpha * edgeFade * 42f).toInt(), 195, 215, 245),
+                    Color.argb(0, 195, 215, 245),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(cx, cy, lr * 1.6f, paint)
+            }
+                        paint.shader = null
+                    }
+                    for (i in 0 until pendingSpawn) spawnCloud(true)
+                    postInvalidateOnAnimation()
+                }
+            }
     
                 
 
@@ -529,6 +786,7 @@ private val DEFAULT_ON_ROWS = setOf(
         root.addView(bodyLayout)
         header.setOnClickListener {
             val showing = bodyLayout.visibility == View.VISIBLE
+            TransitionManager.beginDelayedTransition(root, AutoTransition().setDuration(180))
             bodyLayout.visibility = if (showing) View.GONE else View.VISIBLE
             chev.text = if (showing) "▸" else "▾"
         }
@@ -799,11 +1057,17 @@ private val DEFAULT_ON_ROWS = setOf(
                 background = skyGradient(ctx)
                 clipChildren = true
             }
+            headerFrame.addView(NightCloudsView(ctx).apply {
+               layoutParams = FrameLayout.LayoutParams(
+                   ViewGroup.LayoutParams.MATCH_PARENT,
+                   ViewGroup.LayoutParams.MATCH_PARENT
+               )
+            })
             headerFrame.addView(ShootingStarsView(ctx).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
+               layoutParams = FrameLayout.LayoutParams(
+                   ViewGroup.LayoutParams.MATCH_PARENT,
+                   ViewGroup.LayoutParams.MATCH_PARENT
+               )
             })
             val content = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
@@ -890,44 +1154,62 @@ private val DEFAULT_ON_ROWS = setOf(
         }
 
         // ── FEBBOX ACCOUNT ──
-        run {
-            val has = getFebBoxToken().isNotBlank()
-            val c = buildCard(
-                ctx, "🔑", "FebBox Account",
-                subtitle = if (has) "Signed in" else "Not signed in",
-                badge = if (has) "✓ Active" else "○ None",
-                badgeColor = if (has) GREEN else SUBTEXT
-            )
-            c.body.addView(labelBlock(
-                ctx,
-                if (has) "You're signed in"
-                else "Sign in to unlock ShowBox/FebBox sources",
-                if (has) "Session saved — nothing else to do."
-                else "A WebView will open. Log in with your FebBox account and tap Save Token."
-            ))
-            c.body.addView(actionRow(
-                ctx, "Sign in / Refresh", "Opens febbox.com login",
-                if (has) "Re-login" else "Sign in"
-            ) {
-                openFebBoxLogin(ctx) {
-                    onSaved()
-                    dialog.dismiss()
-                    showSettingsDialog(ctx, onSaved)
-                }
-            })
-            if (has) {
-                c.body.addView(actionRow(
-                    ctx, "Sign out", "Removes saved session",
-                    "Sign out", buttonColor = RED
-                ) {
-                    clearFebBoxToken()
-                    Toast.makeText(ctx, "Signed out", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                    showSettingsDialog(ctx, onSaved)
-                })
-            }
-            body.addView(c.root)
+run {
+    val has = getFebBoxToken().isNotBlank()
+    val c = buildCard(
+        ctx, "🔑", "FebBox Account",
+        subtitle = if (has) "Signed in" else "Not signed in",
+        badge = if (has) "✓ Active" else "○ None",
+        badgeColor = if (has) GREEN else SUBTEXT
+    )
+    c.body.addView(labelBlock(
+        ctx,
+        if (has) "You're signed in"
+        else "Sign in to unlock ShowBox/FebBox sources",
+        if (has) "Session saved — nothing else to do."
+        else "Sign in via WebView, or paste a cookie from febbox.com."
+    ))
+    c.body.addView(actionRow(
+        ctx, "Sign in / Refresh", "Opens febbox.com login",
+        if (has) "Re-login" else "Sign in"
+    ) {
+        openFebBoxLogin(ctx) {
+            onSaved()
+            dialog.dismiss()
+            showSettingsDialog(ctx, onSaved)
         }
+    })
+    c.body.addView(actionRow(
+        ctx, "Paste token", "Manually paste cookie from febbox.com",
+        "Paste"
+    ) {
+        showPasteTokenDialog(ctx) {
+            onSaved()
+            dialog.dismiss()
+            showSettingsDialog(ctx, onSaved)
+        }
+    })
+    if (has) {
+        c.body.addView(actionRow(
+            ctx, "Copy token", "Copy saved session to clipboard",
+            "Copy"
+        ) {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("FebBox Token", getFebBoxToken()))
+            Toast.makeText(ctx, "Token copied", Toast.LENGTH_SHORT).show()
+        })
+        c.body.addView(actionRow(
+            ctx, "Sign out", "Removes saved session",
+            "Sign out", buttonColor = RED
+        ) {
+            clearFebBoxToken()
+            Toast.makeText(ctx, "Signed out", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            showSettingsDialog(ctx, onSaved)
+        })
+    }
+    body.addView(c.root)
+}
 
         // ── SOURCES ──
         run {
