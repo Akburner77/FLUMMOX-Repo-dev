@@ -636,15 +636,16 @@ private class NightCloudsView(context: Context) : View(context) {
         }
 
         val iter = clouds.iterator()
+        var pendingSpawn = 0
         while (iter.hasNext()) {
             val c = iter.next()
             c.x -= c.speed * dt
 
             if (c.x + c.width < -60f) {
                 iter.remove()
-                spawnCloud(true)
+                pendingSpawn++
                 continue
-            }
+        }
 
             // Fade at both edges so clouds don't pop in/out
             val edgeFade = when {
@@ -670,11 +671,12 @@ private class NightCloudsView(context: Context) : View(context) {
                 )
                 canvas.drawCircle(cx, cy, lr * 1.6f, paint)
             }
-            paint.shader = null
-        }
-        postInvalidateOnAnimation()
-    }
-}
+                        paint.shader = null
+                    }
+                    for (i in 0 until pendingSpawn) spawnCloud(true)
+                    postInvalidateOnAnimation()
+                }
+            }
     
                 
 
