@@ -70,8 +70,6 @@ object Settings {
     const val K_ROW_ORDER = "bingecloud_row_order"
     const val K_ROW_TRENDING_MOVIES = "bingecloud_row_trending_movies"
     const val K_ROW_TRENDING_SERIES = "bingecloud_row_trending_series"
-    const val K_ROW_POPULAR_MOVIES = "bingecloud_row_popular_movies"
-    const val K_ROW_POPULAR_SERIES = "bingecloud_row_popular_series"
     const val K_ROW_TVDB_MOVIES = "bingecloud_row_tvdb_movies"
     const val K_ROW_TVDB_SERIES = "bingecloud_row_tvdb_series"
     const val K_ROW_TVDB_GENRES_MOVIES = "bingecloud_row_tvdb_genres_movies"
@@ -91,49 +89,79 @@ object Settings {
     const val K_ROW_HINDI_MOVIES = "bingecloud_row_hindi_movies"
     const val K_ROW_HINDI_SERIES = "bingecloud_row_hindi_series"
     const val K_ROW_ANIME_SCHEDULE = "bingecloud_row_anime_schedule"
-    const val K_VERBOSE_LOG = "bingecloud_verbose_log"
 
-    val DEFAULT_CF_DOMAINS = emptyList<String>()
+// ── Streaming platforms (one row per platform, mixed movie + series) ──
+    const val K_ROW_STREAM_NETFLIX = "bingecloud_row_stream_netflix"
+    const val K_ROW_STREAM_PRIME = "bingecloud_row_stream_prime"
+    const val K_ROW_STREAM_DISNEY = "bingecloud_row_stream_disney"
+    const val K_ROW_STREAM_MAX = "bingecloud_row_stream_max"
+    const val K_ROW_STREAM_APPLETV = "bingecloud_row_stream_appletv"
+    const val K_ROW_STREAM_JIOHOTSTAR = "bingecloud_row_stream_jiohotstar"
+    const val K_ROW_STREAM_JIOCINEMA = "bingecloud_row_stream_jiocinema"
+    const val K_ROW_STREAM_SONYLIV = "bingecloud_row_stream_sonyliv"
+    const val K_ROW_STREAM_ZEE5 = "bingecloud_row_stream_zee5"
+
+    const val K_VERBOSE_LOG = "bingecloud_verbose_log"
 
     // ══════════════════════════════════════════════════════════
     // ── ALL ROWS ──
     // ══════════════════════════════════════════════════════════
     val ALL_ROWS: List<RowSpec> = listOf(
-        RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
-        RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
-        RowSpec(K_ROW_POPULAR_MOVIES, "movie", "tmdb.trending", "Popular Movies", "Week", "TMDB • This Week"),
-        RowSpec(K_ROW_POPULAR_SERIES, "series", "tmdb.trending", "Popular Series", "Week", "TMDB • This Week"),
-        RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "Hindi", "TMDB • Hindi"),
-        RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "Hindi", "TMDB • Hindi"),
-        RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "genre=Action", "TVDB"),
-        RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
-        RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
-        RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
-        RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "Monday", "MAL"),
-        RowSpec(K_ROW_TOP_ANIME_MOVIES, "anime", "mal.top_movies", "Top Anime Movies", null, "MAL"),
-        RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
-        RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
-        RowSpec(K_ROW_MOST_FAV_ANIME, "anime", "mal.most_favorites", "Most Favorited Anime", null, "MAL"),
-        RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best of 2020s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best of 2010s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best of 2000s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best of 90s", "genre=Action", "MAL"),
-        RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best of 80s", "genre=Action", "MAL"),
-    )
+    // ── Trending ──
+    RowSpec(K_ROW_TRENDING_MOVIES, "movie", "tmdb.trending", "Trending Movies", "Day", "TMDB • Today"),
+    RowSpec(K_ROW_TRENDING_SERIES, "series", "tmdb.trending", "Trending Series", "Day", "TMDB • Today"),
+    
+    // ── Streaming platforms ──
+    RowSpec(K_ROW_STREAM_NETFLIX, "movie", "tmdb.provider.8", "Netflix", null, "Netflix"),
+    RowSpec(K_ROW_STREAM_PRIME, "movie", "tmdb.provider.9", "Prime Video", null, "Prime Video"),
+    RowSpec(K_ROW_STREAM_DISNEY, "movie", "tmdb.provider.337", "Disney+", null, "Disney+"),
+    RowSpec(K_ROW_STREAM_MAX, "movie", "tmdb.provider.1899", "Max", null, "Max"),
+    RowSpec(K_ROW_STREAM_APPLETV, "movie", "tmdb.provider.350", "Apple TV+", null, "Apple TV+"),
+    RowSpec(K_ROW_STREAM_JIOHOTSTAR, "movie", "tmdb.provider.122", "JioHotstar", null, "JioHotstar"),
+    RowSpec(K_ROW_STREAM_JIOCINEMA, "movie", "tmdb.provider.220", "JioCinema", null, "JioCinema"),
+    RowSpec(K_ROW_STREAM_SONYLIV, "movie", "tmdb.provider.237", "SonyLIV", null, "SonyLIV"),
+    RowSpec(K_ROW_STREAM_ZEE5, "movie", "tmdb.provider.232", "ZEE5", null, "ZEE5"),
 
-    private val DEFAULT_ON_ROWS = setOf(
-        K_ROW_TRENDING_MOVIES,
-        K_ROW_TRENDING_SERIES,
-        K_ROW_POPULAR_MOVIES,
-        K_ROW_POPULAR_SERIES,
-        K_ROW_HINDI_MOVIES,
-        K_ROW_HINDI_SERIES,
-        K_ROW_TOP_ANIME,
-        K_ROW_AIRING_ANIME
-    )
+    // ── Indian ──
+    RowSpec(K_ROW_HINDI_MOVIES, "movie", "tmdb.language", "Hindi Movies", "Hindi", "TMDB • Hindi"),
+    RowSpec(K_ROW_HINDI_SERIES, "series", "tmdb.language", "Hindi Series", "Hindi", "TMDB • Hindi"),
+
+    // ── Anime ──
+    RowSpec(K_ROW_TOP_ANIME, "anime", "mal.top_anime", "Top Anime", null, "MAL"),
+    RowSpec(K_ROW_AIRING_ANIME, "anime", "mal.airing", "Airing Now", null, "MAL"),
+    RowSpec(K_ROW_MOST_POPULAR_ANIME, "anime", "mal.most_popular", "Most Popular Anime", null, "MAL"),
+    RowSpec(K_ROW_MOST_FAV_ANIME, "anime", "mal.most_favorites", "Most Favorited Anime", null, "MAL"),
+    RowSpec(K_ROW_UPCOMING_ANIME, "anime", "mal.upcoming", "Upcoming Anime", null, "MAL"),
+    RowSpec(K_ROW_TOP_ANIME_MOVIES, "anime", "mal.top_movies", "Top Anime Movies", null, "MAL"),
+    RowSpec(K_ROW_TOP_ANIME_SERIES, "anime", "mal.top_series", "Top Anime Series", null, "MAL"),
+    RowSpec(K_ROW_ANIME_SCHEDULE, "anime", "mal.schedule", "Airing Schedule", "Monday", "MAL"),
+
+    // ── TVDB ──
+    RowSpec(K_ROW_TVDB_MOVIES, "movie", "tvdb.trending", "TVDB Trending Movies", "genre=Action", "TVDB"),
+    RowSpec(K_ROW_TVDB_SERIES, "series", "tvdb.trending", "TVDB Trending Series", "genre=Action", "TVDB"),
+    RowSpec(K_ROW_TVDB_GENRES_MOVIES, "movie", "tvdb.genres", "TVDB Genre Movies", "genre=Action", "TVDB"),
+    RowSpec(K_ROW_TVDB_GENRES_SERIES, "series", "tvdb.genres", "TVDB Genre Series", "genre=Action", "TVDB"),
+
+    // ── Best Anime of decade ──
+    RowSpec(K_ROW_BEST_2020S, "anime", "mal.20sDecade", "Best Anime of 2020s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_2010S, "anime", "mal.10sDecade", "Best Anime of 2010s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_2000S, "anime", "mal.00sDecade", "Best Anime of 2000s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_90S, "anime", "mal.90sDecade", "Best Anime of 90s", "genre=Action", "MAL"),
+    RowSpec(K_ROW_BEST_80S, "anime", "mal.80sDecade", "Best Anime of 80s", "genre=Action", "MAL"),
+)
+
+private val DEFAULT_ON_ROWS = setOf(
+    K_ROW_TRENDING_MOVIES,
+    K_ROW_TRENDING_SERIES,
+    K_ROW_STREAM_NETFLIX,
+    K_ROW_STREAM_PRIME,
+    K_ROW_STREAM_DISNEY,
+    K_ROW_STREAM_SONYLIV,
+    K_ROW_HINDI_MOVIES,
+    K_ROW_HINDI_SERIES,
+    K_ROW_TOP_ANIME,
+    K_ROW_AIRING_ANIME,
+)
 
     // ── row order ──
     fun getRowOrder(): List<String> {
@@ -153,6 +181,69 @@ object Settings {
 
     fun isRowEnabled(key: String): Boolean =
         getKey<Boolean>(key) ?: (key in DEFAULT_ON_ROWS)
+
+    fun resetHomeToDefaults() {
+        setKey(K_ROW_ORDER, ALL_ROWS.map { it.key }.joinToString("|"))
+        for (spec in ALL_ROWS) {
+        setKey(spec.key, spec.key in DEFAULT_ON_ROWS)
+        }
+    }
+
+    private fun showResetConfirmDialog(ctx: Context, onConfirm: () -> Unit) {
+    val dlg = AlertDialog.Builder(ctx).create()
+    val root = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        background = cardBg(ctx)
+        setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
+    }
+    root.addView(TextView(ctx).apply {
+        text = "⚠️  Reset home to defaults?"
+        setTextColor(TEXT)
+        textSize = 17f
+        setTypeface(typeface, Typeface.BOLD)
+    })
+    root.addView(TextView(ctx).apply {
+        text = "This will restore all home catalogs to their default rows, order and toggles. Your sources, cookies and other settings won't be affected."
+        setTextColor(SUBTEXT)
+        textSize = 13f
+        setPadding(0, dp(ctx, 12), 0, dp(ctx, 20))
+    })
+    val btnRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.END
+    }
+    btnRow.addView(Button(ctx).apply {
+        text = "Cancel"
+        textSize = 14f
+        setTextColor(TEXT)
+        background = bg(ROW, 14, ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        setOnClickListener { dlg.dismiss() }
+    })
+    btnRow.addView(Button(ctx).apply {
+        text = "Reset"
+        textSize = 14f
+        setTextColor(RED)
+        background = bg(0x22F87171, 14, ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { leftMargin = dp(ctx, 8) }
+        setOnClickListener {
+            dlg.dismiss()
+            onConfirm()
+        }
+    })
+    root.addView(btnRow)
+    dlg.setView(root)
+    dlg.window?.setBackgroundDrawable(cardBg(ctx))
+    dlg.show()
+}
 
     // ── basic prefs ──
     fun getConcurrency(): Int = (getKey<Int>(K_CONCURRENCY) ?: 50).coerceIn(1, 50)
@@ -272,65 +363,102 @@ object Settings {
     // ── SHOOTING STARS ──
     // ══════════════════════════════════════════════════════════
     private class ShootingStarsView(context: Context) : View(context) {
-        private data class Star(
-            var x: Float, var y: Float, var vx: Float, var vy: Float,
-            var length: Float, var alpha: Float, var thickness: Float
-        )
-        private val stars = mutableListOf<Star>()
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
-        private val rnd = java.util.Random()
-        private var lastNs = 0L
+    private data class Star(
+        var x: Float, var y: Float,
+        var vx: Float, var vy: Float,
+        var length: Float, var alpha: Float,
+        var thickness: Float, var age: Float, var lifespan: Float
+    )
+    private val stars = mutableListOf<Star>()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
+    private val rnd = java.util.Random()
+    private var lastNs = 0L
 
-        init { setWillNotDraw(false) }
+    init { setWillNotDraw(false) }
 
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val now = System.nanoTime()
-            val dt = if (lastNs == 0L) 0f
-                else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
-            lastNs = now
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val now = System.nanoTime()
+        val dt = if (lastNs == 0L) 0f
+            else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
+        lastNs = now
 
-            if (rnd.nextFloat() < 0.03f && stars.size < 6) {
-                val startX = width + 60f + rnd.nextFloat() * 200f
-                val startY = -40f + rnd.nextFloat() * (height * 0.7f)
-                val speed = 280f + rnd.nextFloat() * 260f
-                stars.add(Star(
-                    startX, startY,
-                    -speed * 0.9f, speed * 0.55f,
-                    70f + rnd.nextFloat() * 90f,
-                    0.55f + rnd.nextFloat() * 0.45f,
-                    1.2f + rnd.nextFloat() * 1.6f
-                ))
-            }
-
-            val iter = stars.iterator()
-            while (iter.hasNext()) {
-                val s = iter.next()
-                s.x += s.vx * dt; s.y += s.vy * dt
-                if (s.x < -250f || s.y > height + 80f) { iter.remove(); continue }
-
-                val lenScale = (s.x / width.toFloat()).coerceIn(0f, 1f)
-                val fade = 1f - (1f - lenScale) * 0.6f
-                val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
-
-                val tx = s.x - s.vx / 280f * s.length
-                val ty = s.y - s.vy / 280f * s.length
-
-                paint.color = Color.argb(a / 3, 140, 200, 255)
-                paint.strokeWidth = s.thickness * 2.2f
-                canvas.drawLine(s.x, s.y, tx, ty, paint)
-
-                paint.color = Color.argb(a, 200, 235, 255)
-                paint.strokeWidth = s.thickness
-                canvas.drawLine(s.x, s.y, tx, ty, paint)
-
-                paint.color = Color.argb((a * 0.9f).toInt(), 255, 255, 255)
-                paint.strokeWidth = s.thickness * 1.8f
-                canvas.drawPoint(s.x, s.y, paint)
-            }
-            postInvalidateOnAnimation()
+        // Rare spawn — real shooting stars are uncommon
+        if (rnd.nextFloat() < 0.006f && stars.size < 2) {
+            // Natural trajectory: from upper-right, moving down-left
+            // angle below horizontal varies 25°–55°
+            val angleDeg = 25f + rnd.nextFloat() * 30f
+            val rad = Math.toRadians(angleDeg.toDouble())
+            val speed = 340f + rnd.nextFloat() * 260f
+            val startX = width * (0.5f + rnd.nextFloat() * 0.7f)
+            val startY = -30f + rnd.nextFloat() * (height * 0.5f)
+            stars.add(Star(
+                x = startX,
+                y = startY,
+                vx = (-Math.cos(rad) * speed).toFloat(),
+                vy = (Math.sin(rad) * speed).toFloat(),
+                length = 100f + rnd.nextFloat() * 120f,
+                alpha = 0.75f + rnd.nextFloat() * 0.25f,
+                thickness = 1.0f + rnd.nextFloat() * 1.1f,
+                age = 0f,
+                lifespan = 1.0f + rnd.nextFloat() * 0.8f
+            ))
         }
+
+        val iter = stars.iterator()
+        while (iter.hasNext()) {
+            val s = iter.next()
+            s.x += s.vx * dt
+            s.y += s.vy * dt
+            s.age += dt
+
+            if (s.age > s.lifespan || s.x < -260f || s.x > width + 260f || s.y > height + 80f) {
+                iter.remove(); continue
+            }
+
+            // Fade in first 15%, hold, fade out last 45%
+            val lifeFrac = (s.age / s.lifespan).coerceIn(0f, 1f)
+            val fadeIn = (lifeFrac / 0.15f).coerceIn(0f, 1f)
+            val fadeOut = ((1f - lifeFrac) / 0.45f).coerceIn(0f, 1f)
+            val fade = fadeIn * fadeOut
+            val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
+
+            // Tail endpoint
+            val speedMag = Math.hypot(s.vx.toDouble(), s.vy.toDouble()).toFloat().coerceAtLeast(1f)
+            val tx = s.x - (s.vx / speedMag) * s.length
+            val ty = s.y - (s.vy / speedMag) * s.length
+
+            // Tail — gradient shader, bright at head fading to transparent
+            val tailShader = android.graphics.LinearGradient(
+                s.x, s.y, tx, ty,
+                Color.argb(a, 235, 245, 255),
+                Color.argb(0, 200, 235, 255),
+                android.graphics.Shader.TileMode.CLAMP
+            )
+            paint.shader = tailShader
+            paint.strokeWidth = s.thickness
+            canvas.drawLine(s.x, s.y, tx, ty, paint)
+            paint.shader = null
+
+            // Soft layered glow around head (no BlurMaskFilter — hardware canvas compatible)
+            paint.color = Color.argb((a * 0.15f).toInt(), 180, 220, 255)
+            paint.strokeWidth = s.thickness * 4.5f
+            canvas.drawPoint(s.x, s.y, paint)
+
+            paint.color = Color.argb((a * 0.35f).toInt(), 200, 235, 255)
+            paint.strokeWidth = s.thickness * 2.4f
+            canvas.drawPoint(s.x, s.y, paint)
+
+            // Bright core head
+            paint.color = Color.argb(a, 255, 255, 255)
+            paint.strokeWidth = s.thickness * 1.3f
+            canvas.drawPoint(s.x, s.y, paint)
+        }
+        postInvalidateOnAnimation()
     }
+    }
+    
+                
 
     // ══════════════════════════════════════════════════════════
     // ── CARD BUILDER ──
@@ -1013,11 +1141,22 @@ object Settings {
                     ))
                 }
             }
-            renderList()
-            c.body.addView(labelBlock(ctx, "Section order",
-                "Position 1 shows first on the home screen."))
-            c.body.addView(listHolder)
-            body.addView(c.root)
+            
+               renderList()
+               c.body.addView(actionRow(
+                   ctx, "Reset home", "Restore default rows, order and toggles",
+                   "Reset", buttonColor = RED
+               ) {
+                    showResetConfirmDialog(ctx) {
+                        resetHomeToDefaults()
+                        renderList()
+                        Toast.makeText(ctx, "Home reset to defaults", Toast.LENGTH_SHORT).show()
+                    }
+              })
+              c.body.addView(labelBlock(ctx, "Section order",
+                    "Position 1 shows first on the home screen."))
+              c.body.addView(listHolder)
+              body.addView(c.root)
         }
 
         // ── footer ──

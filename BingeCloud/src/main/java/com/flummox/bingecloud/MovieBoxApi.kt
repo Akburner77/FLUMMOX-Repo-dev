@@ -175,7 +175,8 @@ data class MBStream(
     val size: String?,
     val signCookie: String? = null,
     val audio: String? = null,
-    val durationSec: Long = 0L
+    val durationSec: Long = 0L,
+    val captions: List<Pair<String, String>> = emptyList()
 )
 
 private fun extractPolicyResource(signCookie: String?): String? {
@@ -281,16 +282,33 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
     val q = "subjectId=$subjectId&se=$season&ep=$episode"
     val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
     val root = json.optJSONObject("data") ?: json
-    val arr = root.optJSONArray("streams") ?: root.optJSONArray("videos") ?: root.optJSONArray("list") ?: return emptyList()
-    val out = mutableListOf<MBStream>()
+val arr = root.optJSONArray("streams") ?: root.optJSONArray("videos") ?: root.optJSONArray("list") ?: return emptyList()
+
+val captionsList = mutableListOf<Pair<String, String>>()
+val captionsArr = root.optJSONArray("captions")
+    ?: root.optJSONArray("subtitle")
+    ?: root.optJSONArray("subtitles")
+if (captionsArr != null) {
+    for (i in 0 until captionsArr.length()) {
+        val c = captionsArr.optJSONObject(i) ?: continue
+        val lang = c.optString("language").ifBlank { c.optString("lang") }.ifBlank { "Unknown" }
+        val url = c.optString("url").ifBlank { c.optString("file") }
+        if (url.isNotBlank()) captionsList.add(lang to url)
+    }
+}
+if (captionsList.isNotEmpty()) BCLog.d("MB captions: ${captionsList.map { it.first }}")
+
+val out = mutableListOf<MBStream>()
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
         if (url.isBlank()) continue
         val resolutionsStr = o.optString("resolutions").ifBlank { null }
-        val quality = resolutionsStr?.split(",")?.firstOrNull()?.trim()?.let {
-            if (it.toIntOrNull() != null) "${it}p" else it
-        } ?: o.optString("quality").ifBlank { "Auto" }
+        val quality = resolutionsStr?.split(",")
+           ?.mapNotNull { it.trim().removeSuffix("p").removeSuffix("P").toIntOrNull() }
+           ?.maxOrNull()
+           ?.let { "${it}p" }
+           ?: o.optString("quality").ifBlank { "Auto" }
 
         var dur = o.optLong("duration", 0L)
         if (dur <= 0) dur = o.optLong("durationSeconds", 0L)
@@ -304,14 +322,15 @@ suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLa
         BCLog.d("MB raw [$audioLabel] dur=${dur}s fmt=${o.optString("format")} codec=${o.optString("codecName")} size=${o.optString("size")} realUrl=$urlHead")
 
         out.add(MBStream(
-            url = url,
-            realUrl = realUrl,
-            quality = quality,
-            size = o.optString("size").ifBlank { null },
-            signCookie = signCookie,
-            audio = audioLabel,
-            durationSec = dur
-        ))
+    url = url,
+    realUrl = realUrl,
+    quality = quality,
+    size = o.optString("size").ifBlank { null },
+    signCookie = signCookie,
+    audio = audioLabel,
+    durationSec = dur,
+    captions = captionsList
+))
     }
     BCLog.d("MB play [$audioLabel]: ${out.size} streams")
     return out

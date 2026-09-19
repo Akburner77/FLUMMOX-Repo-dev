@@ -30,7 +30,8 @@ data class ScrapedMirror(
     val mirror: String,
     val url: String,
     val source: String,
-    val headers: Map<String, String>? = null
+    val headers: Map<String, String>? = null,
+    val captions: List<Pair<String, String>> = emptyList()
 )
 
 // ═══════════════════════════════════════════
@@ -89,12 +90,11 @@ fun titleMatches(a: String, b: String): Boolean {
     if (ta.isEmpty() || tb.isEmpty()) return false
     val common = ta.intersect(tb)
     if (common.isEmpty()) return false
-    if (ta.size == 1 || tb.size == 1) {
-        return common.size == minOf(ta.size, tb.size) && common.size == 1
-    }
-    val queryInCandidate = common.size.toFloat() / ta.size
-    val candidateInQuery = common.size.toFloat() / tb.size
-    return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
+            if (ta.size == 1) return sb.startsWith(sa)
+        if (tb.size == 1) return sa.startsWith(sb)
+        val queryInCandidate = common.size.toFloat() / ta.size
+        val candidateInQuery = common.size.toFloat() / tb.size
+        return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
 }
 
 private val SEASON_MATCH_ALL_TOKENS = listOf(
@@ -425,17 +425,18 @@ private suspend fun movieboxExtractRaw(q: StreamQuery): List<ScrapedMirror> = co
     BCLog.d("MB total: ${allStreams.size} streams / ${languages.size} langs")
 
     allStreams
-        .distinctBy { it.realUrl }
-        .filter { it.durationSec == 0L || it.durationSec >= 120L }
-        .map {
-            ScrapedMirror(
-                quality = it.quality.ifBlank { "Auto" },
-                mirror = prettyAudio(it.audio ?: "MovieBox"),
-                url = it.realUrl,
-                source = "MB",
-                headers = it.signCookie?.let { c -> mapOf("Cookie" to c) }
-            )
-        }
+    .distinctBy { it.realUrl }
+    .filter { it.durationSec == 0L || it.durationSec >= 120L }
+    .map {
+        ScrapedMirror(
+            quality = it.quality.ifBlank { "Auto" },
+            mirror = prettyAudio(it.audio ?: "MovieBox"),
+            url = it.realUrl,
+            source = "MB",
+            headers = it.signCookie?.let { c -> mapOf("Cookie" to c) },
+            captions = it.captions
+        )
+    }
 }
 
 private fun prettyAudio(raw: String): String {
@@ -652,18 +653,49 @@ private suspend fun anikotoExtractRaw(q: StreamQuery): List<ScrapedMirror> {
 // ═══════════════════════════════════════════
 // ── Wrapper resolution ──
 // ═══════════════════════════════════════════
-suspend fun resolveWrapper(url: String): String? {
+suspend fun resolveWrapper(url: String, depth: Int = 0): String? {
+    if (depth > 3) return null
     if (url.contains("hubcloud.ist/drive/", true) || url.contains("hubcloud.cx/drive/", true)) return url
     if (url.contains("vcloud.", true)) return url
     if (url.contains("gdflix", true)) return url
     if (url.contains("greenmountmotors.com") || url.contains("hdstream4u.com")) return null
+
     val doc = cloudflareGetDoc(url) ?: return null
+
+    // Direct anchor hits
     doc.selectFirst("a[href*='hubcloud.ist/drive/'], a[href*='hubcloud.cx/drive/']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='vcloud.']")?.attr("href")?.let { return it }
     doc.selectFirst("a[href*='gdflix']")?.attr("href")?.let { return it }
+
+    // hubcdn.wiki/file/X style: JS sets `var reurl = "https://decoy/?r=<b64>"`
+    // b64 payload decodes to https://hubcdn.club/dl/?link=<R2 URL>
+        val reurl = Regex("""var\s+reurl\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        .find(doc.html())?.groupValues?.get(1)
+        if (!reurl.isNullOrBlank()) {
+        val b64 = Regex("""[?&]r=([A-Za-z0-9+/=_-]+)""").find(reurl)?.groupValues?.get(1)
+        if (!b64.isNullOrBlank()) {
+            try {
+                val normalized = b64.replace('-', '+').replace('_', '/')
+                val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+                val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT)).trim()
+                if (decoded.contains("r2.dev", ignoreCase = true) ||
+                    decoded.contains("video-downloads.googleusercontent.com", ignoreCase = true)) {
+                    BCLog.d("resolveWrapper skip unplayable gateway: ${decoded.take(80)}")
+                    return null
+                }
+                if (decoded.startsWith("http")) {
+                    BCLog.d("resolveWrapper reurl → ${decoded.take(100)}")
+                    return decoded
+                }
+            } catch (e: Exception) {
+                BCLog.e("resolveWrapper reurl decode failed: ${e.message}")
+            }
+        }
+    }
+
+    BCLog.d("resolveWrapper no-match: ${url.take(80)}")
     return null
 }
-
 // ═══════════════════════════════════════════
 // ── Entry point ──
 // ═══════════════════════════════════════════
@@ -708,10 +740,14 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         })
         
         if (Settings.isSrcMovieBox()) jobs.add(async {
-            kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
-                try { movieboxExtractRaw(q) } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
-            } ?: run { BCLog.d("MB timeout"); emptyList() }
-        })
+    kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+        try {
+            com.flummox.bingecore.SpeedBooster.deduped("mb:${q.cacheKey()}") {
+                movieboxExtractRaw(q)
+            }
+        } catch (e: Exception) { BCLog.e("MB task failed: ${e.message}"); emptyList() }
+    } ?: run { BCLog.d("MB timeout"); emptyList() }
+})
         if (Settings.isSrcAnikoto()) jobs.add(async {
             kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
                 try {

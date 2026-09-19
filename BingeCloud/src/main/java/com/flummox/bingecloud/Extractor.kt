@@ -219,7 +219,23 @@ open class VCloud(
                      href.contains("gpdl.hubcloud", true) || href.contains("pixeldrain", true) ||
                      href.contains("busycdn", true) || href.contains("video-downloads", true))) {
                     val serverName = a.text().ifBlank { "HubCloud" }.trim()
-                    val display = displayName(serverName)
+         // 10Gbps CDN returns URLs that load but don't play — skip until upstream fixed
+                if (serverName.contains("10gbps", ignoreCase = true) ||
+                   serverName.contains("10 gbps", ignoreCase = true)) {
+                   BCLog.d("VCloud skip 10Gbps anchor")
+                   continue
+                   }
+        // r2.dev anchor without a video file extension → gateway, not a playable file
+               if (href.contains("r2.dev", ignoreCase = true)) {
+                   val isVideoExt = href.endsWith(".mp4", true) || href.endsWith(".mkv", true) ||
+                       href.endsWith(".webm", true) || href.endsWith(".m3u8", true) ||
+                       href.endsWith(".mpd", true)
+                  if (!isVideoExt) {
+                       BCLog.d("VCloud skip r2.dev gateway anchor")
+                       continue
+                  }
+               }
+                   val display = displayName(serverName)
                     BCLog.d("VCloud OK: $display (${System.currentTimeMillis() - startMs}ms)")
                     BCCache.put(cacheKey, href)
                     callback.invoke(

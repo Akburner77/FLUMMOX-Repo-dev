@@ -68,12 +68,19 @@ open class BingeCloudProvider : MainAPI() {
         val parts = request.data.split(ROW_TAG)
         if (parts.size < 2) return null
         lastHomeRenderMs = System.currentTimeMillis()
-        val raw = aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
-        val items = raw
-            .filter { !it.isJunk() }
-            .mapNotNull { it.toSearchResponse() }
-        return newHomePageResponse(request.name, items, hasNext = raw.size >= 25)
-    }
+        val isStreaming = parts[1].startsWith("tmdb.provider.")
+val raw: List<AioMeta> = if (isStreaming) {
+    val providerId = parts[1].substringAfterLast(".").toIntOrNull() ?: 0
+    tmdbDiscoverMerged(providerId, (page - 1) * 20)
+} else {
+    aioFetchCatalog(parts[0], parts[1], parts.getOrNull(2), (page - 1) * 25)
+}
+       val items = raw
+           .filter { !it.isJunk() }
+           .mapNotNull { it.toSearchResponse() }
+       val hasMore = if (isStreaming) raw.size >= 20 else raw.size >= 25
+       return newHomePageResponse(request.name, items, hasNext = hasMore)
+       }
 
     // ── search ──
     override suspend fun search(query: String): List<SearchResponse>? {
@@ -355,11 +362,14 @@ open class BingeCloudProvider : MainAPI() {
                                     val hdrs = m.headers
                                     val link = newExtractorLink("MovieBox", display, m.url, linkType) {
                                         this.referer = "https://h5.aoneroom.com/"
-                                        if (hdrs != null) this.headers = hdrs
+                                    if (hdrs != null) this.headers = hdrs
                                     }
-                                    callback.invoke(link)
-                                    emittedCount.incrementAndGet()
-                                    HostHealth.recordSuccess("mb.local")
+                                        callback.invoke(link)
+                                        emittedCount.incrementAndGet()
+                                        HostHealth.recordSuccess("mb.local")
+                                        m.captions.forEach { (lang, subUrl) ->
+                                    try { subtitleCallback(SubtitleFile(lang, subUrl)) } catch (_: Exception) {}
+                                    }
                                 }
                                 else -> {
                                     val finalUrl = resolveWrapper(m.url)
@@ -369,7 +379,13 @@ open class BingeCloudProvider : MainAPI() {
                                     } else {
                                         var emitted = 0
                                         VCloud(m.source, m.mirror, m.quality, emoji)
-                                            .getUrl(finalUrl, "", subtitleCallback) { l -> callback.invoke(l); emitted++ }
+                                        .getUrl(finalUrl, "", subtitleCallback) { l ->
+                                        if (m.source == "HDH" && l.name.startsWith("Unknown")) {
+                                        BCLog.d("skip Unknown HDH: ${l.name}")
+                                    } else {
+                                        callback.invoke(l); emitted++
+                                    }
+                                 }
                                         if (emitted == 0) {
                                             HostHealth.recordFailure(host)
                                         } else {
