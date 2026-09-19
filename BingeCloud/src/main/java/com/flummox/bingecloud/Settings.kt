@@ -23,6 +23,8 @@ import android.webkit.WebViewClient
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.text.InputType
+import android.widget.EditText
 import android.widget.CompoundButton
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -238,6 +240,83 @@ private val DEFAULT_ON_ROWS = setOf(
         setOnClickListener {
             dlg.dismiss()
             onConfirm()
+        }
+    })
+    root.addView(btnRow)
+    dlg.setView(root)
+    dlg.window?.setBackgroundDrawable(cardBg(ctx))
+    dlg.show()
+}
+
+    private fun showPasteTokenDialog(ctx: Context, onSaved: () -> Unit) {
+    val dlg = AlertDialog.Builder(ctx).create()
+    val root = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        background = cardBg(ctx)
+        setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
+    }
+    root.addView(TextView(ctx).apply {
+        text = "✏️  Paste FebBox Token"
+        setTextColor(TEXT)
+        textSize = 17f
+        setTypeface(typeface, Typeface.BOLD)
+    })
+    root.addView(TextView(ctx).apply {
+        text = "Paste the cookie from febbox.com. Either the raw ui value or the full cookie string works."
+        setTextColor(SUBTEXT)
+        textSize = 13f
+        setPadding(0, dp(ctx, 12), 0, dp(ctx, 16))
+    })
+    val input = EditText(ctx).apply {
+        setTextColor(TEXT)
+        setHintTextColor(SUBTEXT)
+        hint = "ui=... or raw value"
+        textSize = 14f
+        background = bg(INPUT, 8, ctx)
+        setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
+        maxLines = 3
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    }
+    root.addView(input, LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ))
+    val btnRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.END
+        setPadding(0, dp(ctx, 20), 0, 0)
+    }
+    btnRow.addView(Button(ctx).apply {
+        text = "Cancel"
+        textSize = 14f
+        setTextColor(TEXT)
+        background = bg(ROW, 14, ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        setOnClickListener { dlg.dismiss() }
+    })
+    btnRow.addView(Button(ctx).apply {
+        text = "Save"
+        textSize = 14f
+        setTextColor(0xFF0A0D14.toInt())
+        background = saveButtonBg(ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { leftMargin = dp(ctx, 8) }
+        setOnClickListener {
+            val raw = input.text?.toString()?.trim().orEmpty()
+            if (raw.isBlank()) {
+                Toast.makeText(ctx, "Token is empty", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            saveFebBoxToken(raw)
+            Toast.makeText(ctx, "✓ Token saved", Toast.LENGTH_SHORT).show()
+            dlg.dismiss()
+            onSaved()
         }
     })
     root.addView(btnRow)
@@ -890,44 +969,62 @@ private val DEFAULT_ON_ROWS = setOf(
         }
 
         // ── FEBBOX ACCOUNT ──
-        run {
-            val has = getFebBoxToken().isNotBlank()
-            val c = buildCard(
-                ctx, "🔑", "FebBox Account",
-                subtitle = if (has) "Signed in" else "Not signed in",
-                badge = if (has) "✓ Active" else "○ None",
-                badgeColor = if (has) GREEN else SUBTEXT
-            )
-            c.body.addView(labelBlock(
-                ctx,
-                if (has) "You're signed in"
-                else "Sign in to unlock ShowBox/FebBox sources",
-                if (has) "Session saved — nothing else to do."
-                else "A WebView will open. Log in with your FebBox account and tap Save Token."
-            ))
-            c.body.addView(actionRow(
-                ctx, "Sign in / Refresh", "Opens febbox.com login",
-                if (has) "Re-login" else "Sign in"
-            ) {
-                openFebBoxLogin(ctx) {
-                    onSaved()
-                    dialog.dismiss()
-                    showSettingsDialog(ctx, onSaved)
-                }
-            })
-            if (has) {
-                c.body.addView(actionRow(
-                    ctx, "Sign out", "Removes saved session",
-                    "Sign out", buttonColor = RED
-                ) {
-                    clearFebBoxToken()
-                    Toast.makeText(ctx, "Signed out", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                    showSettingsDialog(ctx, onSaved)
-                })
-            }
-            body.addView(c.root)
+run {
+    val has = getFebBoxToken().isNotBlank()
+    val c = buildCard(
+        ctx, "🔑", "FebBox Account",
+        subtitle = if (has) "Signed in" else "Not signed in",
+        badge = if (has) "✓ Active" else "○ None",
+        badgeColor = if (has) GREEN else SUBTEXT
+    )
+    c.body.addView(labelBlock(
+        ctx,
+        if (has) "You're signed in"
+        else "Sign in to unlock ShowBox/FebBox sources",
+        if (has) "Session saved — nothing else to do."
+        else "Sign in via WebView, or paste a cookie from febbox.com."
+    ))
+    c.body.addView(actionRow(
+        ctx, "Sign in / Refresh", "Opens febbox.com login",
+        if (has) "Re-login" else "Sign in"
+    ) {
+        openFebBoxLogin(ctx) {
+            onSaved()
+            dialog.dismiss()
+            showSettingsDialog(ctx, onSaved)
         }
+    })
+    c.body.addView(actionRow(
+        ctx, "Paste token", "Manually paste cookie from febbox.com",
+        "Paste"
+    ) {
+        showPasteTokenDialog(ctx) {
+            onSaved()
+            dialog.dismiss()
+            showSettingsDialog(ctx, onSaved)
+        }
+    })
+    if (has) {
+        c.body.addView(actionRow(
+            ctx, "Copy token", "Copy saved session to clipboard",
+            "Copy"
+        ) {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("FebBox Token", getFebBoxToken()))
+            Toast.makeText(ctx, "Token copied", Toast.LENGTH_SHORT).show()
+        })
+        c.body.addView(actionRow(
+            ctx, "Sign out", "Removes saved session",
+            "Sign out", buttonColor = RED
+        ) {
+            clearFebBoxToken()
+            Toast.makeText(ctx, "Signed out", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            showSettingsDialog(ctx, onSaved)
+        })
+    }
+    body.addView(c.root)
+}
 
         // ── SOURCES ──
         run {
