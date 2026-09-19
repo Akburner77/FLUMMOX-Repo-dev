@@ -7,8 +7,9 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
-class BingeCloudPlugin : Plugin() {
-    override fun load(context: Context) {
+override fun load(context: Context) {
+    com.flummox.bingecore.RepoAnalytics.ping(context, "BingeCloud")
+    BingeCloudCtx.context = context
        BingeCloudCtx.context = context
        BCLog.init(context)
        BCLog.setVerbose(Settings.isVerboseLog())
