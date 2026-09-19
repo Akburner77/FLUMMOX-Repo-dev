@@ -5,13 +5,20 @@ import android.app.AlertDialog
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.ColorStateList
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.graphics.Path
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.text.TextUtils
+import android.transition.AutoTransition
+import android.transition.TransitionManager
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -416,29 +423,40 @@ private val DEFAULT_ON_ROWS = setOf(
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
 
-    private fun accentPill(ctx: Context): GradientDrawable = GradientDrawable().apply {
+    private fun withRipple(shape: GradientDrawable, rippleColor: Int = 0x40FFFFFF): RippleDrawable =
+    RippleDrawable(ColorStateList.valueOf(rippleColor), shape, shape)
+
+private fun accentPill(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable().apply {
         setColor(ACCENT_BG)
         cornerRadius = dp(ctx, 20).toFloat()
         setStroke(dp(ctx, 1), 0x337DD3FC)
     }
+)
 
-    private fun saveButtonBg(ctx: Context): GradientDrawable =
-        GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            intArrayOf(SAVE_GRAD_TOP, SAVE_GRAD_BOTTOM)
-        ).apply { cornerRadius = dp(ctx, 14).toFloat() }
+private fun saveButtonBg(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable(
+        GradientDrawable.Orientation.TL_BR,
+        intArrayOf(SAVE_GRAD_TOP, SAVE_GRAD_BOTTOM)
+    ).apply { cornerRadius = dp(ctx, 14).toFloat() },
+    rippleColor = 0x50FFFFFF
+)
 
-    private fun cancelButtonBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
+private fun cancelButtonBg(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable().apply {
         setColor(0xFF000000.toInt())
         cornerRadius = dp(ctx, 14).toFloat()
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
+)
 
-    private fun arrowButtonBg(ctx: Context): GradientDrawable = GradientDrawable().apply {
+private fun arrowButtonBg(ctx: Context): RippleDrawable = withRipple(
+    GradientDrawable().apply {
         setColor(ROW)
         cornerRadius = dp(ctx, 8).toFloat()
         setStroke(dp(ctx, 1), CARD_BORDER)
     }
+)
 
     // ═══════════════════════════════════════hb═══════════════════
     // ── SHOOTING STARS ──
@@ -451,7 +469,9 @@ private val DEFAULT_ON_ROWS = setOf(
         var thickness: Float, var age: Float, var lifespan: Float
     )
     private val stars = mutableListOf<Star>()
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
+    private val tailPath = Path()
+    private val tailPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val headPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rnd = java.util.Random()
     private var lastNs = 0L
 
@@ -464,13 +484,11 @@ private val DEFAULT_ON_ROWS = setOf(
             else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
         lastNs = now
 
-        // Rare spawn — real shooting stars are uncommon
+        // Rare spawn, Genshin-paced: slower drift, longer tail, brighter glow
         if (rnd.nextFloat() < 0.006f && stars.size < 2) {
-            // Natural trajectory: from upper-right, moving down-left
-            // angle below horizontal varies 25°–55°
             val angleDeg = 25f + rnd.nextFloat() * 30f
             val rad = Math.toRadians(angleDeg.toDouble())
-            val speed = 340f + rnd.nextFloat() * 260f
+            val speed = 240f + rnd.nextFloat() * 160f
             val startX = width * (0.5f + rnd.nextFloat() * 0.7f)
             val startY = -30f + rnd.nextFloat() * (height * 0.5f)
             stars.add(Star(
@@ -478,11 +496,11 @@ private val DEFAULT_ON_ROWS = setOf(
                 y = startY,
                 vx = (-Math.cos(rad) * speed).toFloat(),
                 vy = (Math.sin(rad) * speed).toFloat(),
-                length = 100f + rnd.nextFloat() * 120f,
-                alpha = 0.75f + rnd.nextFloat() * 0.25f,
-                thickness = 1.0f + rnd.nextFloat() * 1.1f,
+                length = 140f + rnd.nextFloat() * 160f,
+                alpha = 0.9f + rnd.nextFloat() * 0.1f,
+                thickness = 1.2f + rnd.nextFloat() * 1.0f,
                 age = 0f,
-                lifespan = 1.0f + rnd.nextFloat() * 0.8f
+                lifespan = 1.4f + rnd.nextFloat() * 0.9f
             ))
         }
 
@@ -493,51 +511,170 @@ private val DEFAULT_ON_ROWS = setOf(
             s.y += s.vy * dt
             s.age += dt
 
-            if (s.age > s.lifespan || s.x < -260f || s.x > width + 260f || s.y > height + 80f) {
+            if (s.age > s.lifespan || s.x < -300f || s.x > width + 300f || s.y > height + 100f) {
                 iter.remove(); continue
             }
 
-            // Fade in first 15%, hold, fade out last 45%
             val lifeFrac = (s.age / s.lifespan).coerceIn(0f, 1f)
-            val fadeIn = (lifeFrac / 0.15f).coerceIn(0f, 1f)
-            val fadeOut = ((1f - lifeFrac) / 0.45f).coerceIn(0f, 1f)
+            val fadeIn = (lifeFrac / 0.12f).coerceIn(0f, 1f)
+            val fadeOut = ((1f - lifeFrac) / 0.5f).coerceIn(0f, 1f)
             val fade = fadeIn * fadeOut
             val a = (s.alpha * fade * 255f).coerceIn(0f, 255f).toInt()
 
-            // Tail endpoint
             val speedMag = Math.hypot(s.vx.toDouble(), s.vy.toDouble()).toFloat().coerceAtLeast(1f)
-            val tx = s.x - (s.vx / speedMag) * s.length
-            val ty = s.y - (s.vy / speedMag) * s.length
+            val ux = s.vx / speedMag
+            val uy = s.vy / speedMag
+            val tipX = s.x - ux * s.length
+            val tipY = s.y - uy * s.length
+            val px = -uy
+            val py = ux
+            val headHalf = s.thickness * 1.6f
 
-            // Tail — gradient shader, bright at head fading to transparent
-            val tailShader = android.graphics.LinearGradient(
-                s.x, s.y, tx, ty,
-                Color.argb(a, 235, 245, 255),
-                Color.argb(0, 200, 235, 255),
-                android.graphics.Shader.TileMode.CLAMP
+            // ── Tapered tail as filled path, gradient head→tip ──
+            tailPath.reset()
+            tailPath.moveTo(s.x + px * headHalf, s.y + py * headHalf)
+            tailPath.lineTo(tipX, tipY)
+            tailPath.lineTo(s.x - px * headHalf, s.y - py * headHalf)
+            tailPath.close()
+
+            tailPaint.shader = android.graphics.LinearGradient(
+                s.x, s.y, tipX, tipY,
+                Color.argb(a, 255, 255, 255),
+                Color.argb(0, 190, 215, 255),
+                Shader.TileMode.CLAMP
             )
-            paint.shader = tailShader
-            paint.strokeWidth = s.thickness
-            canvas.drawLine(s.x, s.y, tx, ty, paint)
-            paint.shader = null
+            canvas.drawPath(tailPath, tailPaint)
+            tailPaint.shader = null
 
-            // Soft layered glow around head (no BlurMaskFilter — hardware canvas compatible)
-            paint.color = Color.argb((a * 0.15f).toInt(), 180, 220, 255)
-            paint.strokeWidth = s.thickness * 4.5f
-            canvas.drawPoint(s.x, s.y, paint)
+            // ── Glowing head: three layered radial gradients ──
+            headPaint.shader = RadialGradient(
+                s.x, s.y, s.thickness * 9f,
+                Color.argb((a * 0.18f).toInt(), 200, 225, 255),
+                Color.argb(0, 200, 225, 255),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(s.x, s.y, s.thickness * 9f, headPaint)
 
-            paint.color = Color.argb((a * 0.35f).toInt(), 200, 235, 255)
-            paint.strokeWidth = s.thickness * 2.4f
-            canvas.drawPoint(s.x, s.y, paint)
+            headPaint.shader = RadialGradient(
+                s.x, s.y, s.thickness * 4f,
+                Color.argb((a * 0.55f).toInt(), 225, 240, 255),
+                Color.argb(0, 225, 240, 255),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(s.x, s.y, s.thickness * 4f, headPaint)
 
-            // Bright core head
-            paint.color = Color.argb(a, 255, 255, 255)
-            paint.strokeWidth = s.thickness * 1.3f
-            canvas.drawPoint(s.x, s.y, paint)
+            headPaint.shader = null
+            headPaint.color = Color.argb(a, 255, 255, 255)
+            canvas.drawCircle(s.x, s.y, s.thickness * 1.6f, headPaint)
+
+            // ── Sparkle trail behind head ──
+            for (i in 1..2) {
+                val frac = i * 0.22f
+                val sx = s.x - ux * s.length * frac
+                val sy = s.y - uy * s.length * frac
+                val sparkAlpha = (a * (0.5f - frac * 0.5f)).coerceAtLeast(0f).toInt()
+                headPaint.color = Color.argb(sparkAlpha, 255, 255, 255)
+                canvas.drawCircle(sx, sy, s.thickness * 0.7f, headPaint)
+            }
         }
         postInvalidateOnAnimation()
     }
+}
+
+// ══════════════════════════════════════════════════════════
+// ── NIGHT CLOUDS ──
+// Translucent soft clouds drifting right→left.
+// Runs behind shooting stars inside the header.
+// ══════════════════════════════════════════════════════════
+private class NightCloudsView(context: Context) : View(context) {
+    private data class Cloud(
+        var x: Float, var y: Float,
+        var speed: Float,
+        var width: Float,
+        var height: Float,
+        var alpha: Float,
+        var seed: Int
+    )
+    private val clouds = mutableListOf<Cloud>()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rnd = java.util.Random()
+    private var lastNs = 0L
+
+    init { setWillNotDraw(false) }
+
+    private fun spawnCloud(offscreen: Boolean) {
+        val w = 90f + rnd.nextFloat() * 130f
+        val h = w * (0.32f + rnd.nextFloat() * 0.18f)
+        clouds.add(Cloud(
+            x = if (offscreen) width + w else rnd.nextFloat() * width,
+            y = height * (0.28f + rnd.nextFloat() * 0.55f),
+            speed = 4f + rnd.nextFloat() * 8f,
+            width = w,
+            height = h,
+            alpha = 0.55f + rnd.nextFloat() * 0.3f,
+            seed = rnd.nextInt(1000)
+        ))
     }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (clouds.isEmpty() && w > 0) {
+            spawnCloud(false)
+            spawnCloud(true)
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val now = System.nanoTime()
+        val dt = if (lastNs == 0L) 0f
+            else ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.05f)
+        lastNs = now
+
+        if (clouds.isEmpty() && width > 0) {
+            spawnCloud(false); spawnCloud(true)
+        }
+
+        val iter = clouds.iterator()
+        while (iter.hasNext()) {
+            val c = iter.next()
+            c.x -= c.speed * dt
+
+            if (c.x + c.width < -60f) {
+                iter.remove()
+                spawnCloud(true)
+                continue
+            }
+
+            // Fade at both edges so clouds don't pop in/out
+            val edgeFade = when {
+                c.x < 0f -> ((c.x + c.width) / c.width).coerceIn(0f, 1f)
+                c.x > width - c.width -> ((width - c.x) / c.width).coerceIn(0f, 1f)
+                else -> 1f
+            }
+
+            // 6 lobes → soft cloud silhouette via radial gradients
+            val lobes = 6
+            val step = c.width / lobes
+            val r = c.height * 0.55f
+            for (i in 0 until lobes) {
+                val n = ((c.seed * (i + 1) * 9301 + 49297) % 233280).toFloat() / 233280f
+                val lr = r * (0.55f + n * 0.6f)
+                val cx = c.x + i * step + step / 2f
+                val cy = c.y + (n - 0.5f) * c.height * 0.35f
+                paint.shader = RadialGradient(
+                    cx, cy, lr * 1.6f,
+                    Color.argb((c.alpha * edgeFade * 42f).toInt(), 195, 215, 245),
+                    Color.argb(0, 195, 215, 245),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(cx, cy, lr * 1.6f, paint)
+            }
+            paint.shader = null
+        }
+        postInvalidateOnAnimation()
+    }
+}
     
                 
 
@@ -608,6 +745,7 @@ private val DEFAULT_ON_ROWS = setOf(
         root.addView(bodyLayout)
         header.setOnClickListener {
             val showing = bodyLayout.visibility == View.VISIBLE
+            TransitionManager.beginDelayedTransition(root, AutoTransition().setDuration(180))
             bodyLayout.visibility = if (showing) View.GONE else View.VISIBLE
             chev.text = if (showing) "▸" else "▾"
         }
@@ -878,11 +1016,17 @@ private val DEFAULT_ON_ROWS = setOf(
                 background = skyGradient(ctx)
                 clipChildren = true
             }
+            headerFrame.addView(NightCloudsView(ctx).apply {
+               layoutParams = FrameLayout.LayoutParams(
+                   ViewGroup.LayoutParams.MATCH_PARENT,
+                   ViewGroup.LayoutParams.MATCH_PARENT
+               )
+            })
             headerFrame.addView(ShootingStarsView(ctx).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
+               layoutParams = FrameLayout.LayoutParams(
+                   ViewGroup.LayoutParams.MATCH_PARENT,
+                   ViewGroup.LayoutParams.MATCH_PARENT
+               )
             })
             val content = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
