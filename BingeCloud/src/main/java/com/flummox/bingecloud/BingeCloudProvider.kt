@@ -371,7 +371,27 @@ val raw: List<AioMeta> = if (isStreaming) {
                                     try { subtitleCallback(SubtitleFile(lang, subUrl)) } catch (_: Exception) {}
                                     }
                                 }
-                                else -> {
+                                    "SHOWBOX" -> {
+                                        val linkType = when {
+                                            m.url.contains(".mp4", true) -> ExtractorLinkType.VIDEO
+                                            m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                            m.url.contains(".mkv", true) -> ExtractorLinkType.VIDEO
+                                            else -> ExtractorLinkType.VIDEO
+                                        }
+                                        val display = "$emoji${m.quality} •ShowBox"
+                                        val link = newExtractorLink("ShowBox", display, m.url, linkType) {
+                                            this.referer = "https://www.febbox.com/"
+                                            this.headers = mapOf(
+                                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                                                "Referer" to "https://www.febbox.com/",
+                                                "Range" to "bytes=0-"
+                                             )
+                                       }
+                                       callback.invoke(link)
+                                       emittedCount.incrementAndGet()
+                                       HostHealth.recordSuccess("febbox.local")
+                                   }
+                                   else -> {
                                     val finalUrl = resolveWrapper(m.url)
                                     if (finalUrl == null) {
                                         BCLog.d("unresolved: ${m.mirror}")
