@@ -94,7 +94,7 @@ oFuZne+lYcCPMNDXdku6wKdf9gSnOSHOGMu8TvHcud4uIDYmFH5qabJL5GDoQi7Q
 -----END PRIVATE KEY-----
 """
 
-// ── FebBox request headers. Sends the full saved cookie (ui + cf_clearance + ...) ──
+// ── FebBox request headers. Detects raw ui value vs full cookie string. ──
 private fun sbFebBoxHeaders(): Map<String, String> {
     val base = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
@@ -102,8 +102,10 @@ private fun sbFebBoxHeaders(): Map<String, String> {
         "Accept-Language" to "en",
         "Referer" to "$SB_FEBBOX/"
     )
-    val cookie = Settings.getFebBoxToken()
-    return if (cookie.isNotBlank()) base + ("Cookie" to cookie) else base
+    val raw = Settings.getFebBoxToken()
+    if (raw.isBlank()) return base
+    val cookieHeader = if (raw.contains("=")) raw else "ui=$raw"
+    return base + ("Cookie" to cookieHeader)
 }
 
 private fun sbMd5Hex(input: String): String =
