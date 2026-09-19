@@ -94,9 +94,7 @@ oFuZne+lYcCPMNDXdku6wKdf9gSnOSHOGMu8TvHcud4uIDYmFH5qabJL5GDoQi7Q
 -----END PRIVATE KEY-----
 """
 
-// ── FebBox auth headers ──
-// If user saved a ui cookie via Settings → FebBox Account, include it.
-// Without it, /file/file_share_list returns files with blank "path".
+// ── FebBox request headers. Sends the full saved cookie (ui + cf_clearance + ...) ──
 private fun sbFebBoxHeaders(): Map<String, String> {
     val base = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
@@ -104,8 +102,8 @@ private fun sbFebBoxHeaders(): Map<String, String> {
         "Accept-Language" to "en",
         "Referer" to "$SB_FEBBOX/"
     )
-    val ui = Settings.getFebBoxToken()
-    return if (ui.isNotBlank()) base + ("Cookie" to "ui=$ui") else base
+    val cookie = Settings.getFebBoxToken()
+    return if (cookie.isNotBlank()) base + ("Cookie" to cookie) else base
 }
 
 private fun sbMd5Hex(input: String): String =
@@ -274,23 +272,42 @@ suspend fun sbFileList(shareKey: String, parentId: Long? = null): JSONArray? {
     }
 }
 
-// ── fallback: ask FebBox for the download URL of a specific fid ──
-// Used when file_share_list returns blank "path".
-// Requires the ui cookie for actual URL; anonymous calls usually return error JSON.
+// ── fetch direct download URL for a given fid ──
+// When FebBox returns code=1 but the file URL key is unknown,
+// the raw body dump reveals the correct field name.
 suspend fun sbGetDownloadUrl(shareKey: String, fid: Long): String? {
     val url = "$SB_FEBBOX/file/file_download?fid=$fid&share_key=$shareKey"
     return try {
         val json = app.get(url, headers = sbFebBoxHeaders()).text
+        BCLog.d("ShowBox dl raw fid=$fid: ${json.take(600)}")
+
         val root = JSONObject(json)
-        if (root.optInt("code", -1) != 0) {
-            BCLog.d("ShowBox dl fid=$fid code=${root.optInt("code")} msg=${root.optString("msg").take(80)}")
+        // FebBox uses code=1 for success in some endpoints, code=0 in others
+        val code = root.optInt("code", -1)
+        if (code != 0 && code != 1) {
+            BCLog.d("ShowBox dl fid=$fid code=$code msg=${root.optString("msg").take(80)}")
             return null
         }
+
         val data = root.optJSONObject("data")
+        if (data != null) {
+            BCLog.d("ShowBox dl data keys fid=$fid: ${data.keys().asSequence().toList()}")
+        }
+
+        // Probe every plausible field name
         val dl = data?.optString("download_url")?.takeIf { it.isNotBlank() }
             ?: data?.optString("url")?.takeIf { it.isNotBlank() }
             ?: data?.optString("path")?.takeIf { it.isNotBlank() }
-        if (dl != null) BCLog.d("ShowBox dl fid=$fid → ${dl.take(80)}")
+            ?: data?.optString("link")?.takeIf { it.isNotBlank() }
+            ?: data?.optString("file_url")?.takeIf { it.isNotBlank() }
+            ?: data?.optString("src")?.takeIf { it.isNotBlank() }
+            ?: data?.optString("play_url")?.takeIf { it.isNotBlank() }
+            ?: data?.optString("download")?.takeIf { it.isNotBlank() }
+            ?: root.optString("download_url").takeIf { it.isNotBlank() }
+            ?: root.optString("url").takeIf { it.isNotBlank() }
+
+        if (dl != null) BCLog.d("ShowBox dl fid=$fid → ${dl.take(100)}")
+        else BCLog.d("ShowBox dl fid=$fid: no URL field matched")
         dl
     } catch (e: Exception) {
         BCLog.e("ShowBox dl fid=$fid fail: ${e.message}"); null
@@ -331,7 +348,7 @@ suspend fun showBoxExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         }
     }
 
-        val out = mutableListOf<ScrapedMirror>()
+    val out = mutableListOf<ScrapedMirror>()
     for (i in 0 until fileList.length()) {
         val f = fileList.optJSONObject(i) ?: continue
         val name = f.optString("file_name")
