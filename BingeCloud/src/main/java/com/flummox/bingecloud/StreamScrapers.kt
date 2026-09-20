@@ -757,7 +757,7 @@ suspend fun scrapeAllSources(q: StreamQuery): List<ScrapedMirror> {
         } catch (e: Exception) { BCLog.e("AniKoto task failed: ${e.message}"); emptyList() }
     } ?: run { BCLog.d("AniKoto timeout"); emptyList() }
 })
-if (Settings.isSrcShowBox()) jobs.add(async {
+        if (Settings.isSrcShowBox()) jobs.add(async {
     kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
         try {
             com.flummox.bingecore.SpeedBooster.deduped("showbox:${q.cacheKey()}") {
@@ -765,6 +765,15 @@ if (Settings.isSrcShowBox()) jobs.add(async {
             }
         } catch (e: Exception) { BCLog.e("ShowBox task failed: ${e.message}"); emptyList() }
     } ?: run { BCLog.d("ShowBox timeout"); emptyList() }
+})
+if (Settings.isSrcMlsbd()) jobs.add(async {
+    kotlinx.coroutines.withTimeoutOrNull(PER_SOURCE_TIMEOUT_MS) {
+        try {
+            com.flummox.bingecore.SpeedBooster.deduped("mlsbd:${q.cacheKey()}") {
+                mlsbdExtractRaw(q)
+            }
+        } catch (e: Exception) { BCLog.e("MLSBD task failed: ${e.message}"); emptyList() }
+    } ?: run { BCLog.d("MLSBD timeout"); emptyList() }
 })
 
         if (jobs.isEmpty()) return@coroutineScope emptyList()
@@ -775,7 +784,8 @@ if (Settings.isSrcShowBox()) jobs.add(async {
         val mb = all.count { it.source == "MB" }
         val ak = all.count { it.source == "ANIKOTO" }
         val sb = all.count { it.source == "SHOWBOX" }
-        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb ANIKOTO=$ak SHOWBOX=$sb total=${all.size}")
+        val ml = all.count { it.source == "MLSBD" }
+        BCLog.d("sources done — VM=$vm MD=$md HDH=$hdh MB=$mb ANIKOTO=$ak SHOWBOX=$sb MLSBD=$ml total=${all.size}")
         all
     }
 }
