@@ -33,6 +33,23 @@ private const val HOME_GRACE_MS = 5000L
 fun StreamQuery.cacheKey(): String =
     "scrape:${title.lowercase()}:${year}:${type}:${season}:${episode}"
 
+// ═══════════════════════════════════════════════════════════════
+// ── adult content filter ──
+// Silent blocklist applied to search + home rows.
+// ═══════════════════════════════════════════════════════════════
+private val ADULT_TERMS = setOf(
+    "porn", "porno", "xxx", "erotic", "erotica",
+    "nude", "nudes", "sex tape", "18+", "[18+]",
+    "hotshots", "ullu", "fliz", "gupchup", "lolypop"
+)
+
+private fun isAdultContent(title: String, genres: List<String>?): Boolean {
+    val t = title.lowercase()
+    if (ADULT_TERMS.any { t.contains(it) }) return true
+    if (genres != null && genres.any { it.lowercase().trim() in setOf("erotic", "adult", "18+") }) return true
+    return false
+}
+
 // ── home content filter: drop daily soaps / talk / reality ──
 private val HOME_BLOCKED_GENRES = setOf(
     "soap", "talk", "talk show", "reality", "reality tv", "news", "game show"
