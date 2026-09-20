@@ -1,5 +1,6 @@
 package com.flummox.bingecloud
 
+import com.flummox.bingecore.CloudflareShield
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
