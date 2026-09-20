@@ -12,9 +12,7 @@ import java.util.concurrent.TimeUnit
 
 // ═══════════════════════════════════════════════════════════════
 // ── MLSBD: Bangladeshi movie/series link directory ──
-// Bypasses poisoned system DNS by hardcoding Cloudflare IPs.
-// The custom OkHttpClient ensures these IPs are always used,
-// even if the user's ISP returns dead addresses.
+// ── FIX: Uses a custom DNS resolver to bypass ISP DNS poisoning ──
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
@@ -23,14 +21,13 @@ private const val MLSBD_UA =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 
-// Hardcoded Cloudflare anycast IPs for mlsbd.co
+// ── Custom DNS: Bypass poisoned DNS for mlsbd.co ──
 private val MLSBD_CLOUDFLARE_IPS = listOf(
     "104.26.14.75",
     "104.26.15.75",
     "172.67.72.192"
 )
 
-// Custom DNS that returns Cloudflare IPs for mlsbd.co
 private object MlsbdDns : Dns {
     override fun lookup(hostname: String): List<InetAddress> {
         return if (hostname.equals("mlsbd.co", ignoreCase = true)) {
@@ -41,7 +38,6 @@ private object MlsbdDns : Dns {
     }
 }
 
-// Dedicated OkHttpClient using the custom DNS
 private val mlsbdHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
         .dns(MlsbdDns)
@@ -51,7 +47,7 @@ private val mlsbdHttpClient: OkHttpClient by lazy {
         .build()
 }
 
-// Helper to fetch through the custom DNS client
+// ── Helper to fetch through the custom DNS client ──
 private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
     return try {
         val request = Request.Builder()
@@ -74,6 +70,8 @@ private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
         null
     }
 }
+
+// ... (The rest of the file remains the same)
 
 data class MlsbdHit(val url: String, val title: String, val poster: String?)
 
