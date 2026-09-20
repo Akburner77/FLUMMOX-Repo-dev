@@ -65,32 +65,39 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         BCLog.d("[CF] plain GET threw for $domain: ${e.message}")
     }
 
-    // ── 3. WebViewResolver — no additionalUrls (they short-circuit) ──
-    val wvStart = System.currentTimeMillis()
-    resolveWithWebView(url)
-    val cookies = CookieManager.getInstance().getCookie(url)
-    val wvDuration = System.currentTimeMillis() - wvStart
-    BCLog.d("[CF] WebView cookie len=${cookies?.length ?: 0} (took ${wvDuration}ms)")
-
-    if (cookies.isNullOrBlank()) {
-        BCLog.e("[CF] WebView returned no cookies for $domain")
-        return null
-    }
-
+    // ── 3. WebViewResolver interceptor ──
     return try {
-        val res = app.get(
-            url, referer = referer,
-            headers = mapOf("User-Agent" to CF_UA, "Cookie" to cookies)
+        val interceptor = WebViewResolver(
+            interceptUrl = Regex(".*"),
+            additionalUrls = emptyList(),
+            userAgent = CF_UA,
+            timeout = 30_000L
         )
+        val res = app.get(
+            url,
+            referer = referer,
+            headers = mapOf("User-Agent" to CF_UA),
+            interceptor = interceptor
+        )
+        val cookieNow = CookieManager.getInstance().getCookie(url)
+        BCLog.d("[CF] post-interceptor cookie len=${cookieNow?.length ?: 0}")
         if (res.code in 200..299 && !isChallenge(res.text)) {
-            BCLog.d("[CF] post-WebView GET ok for $domain")
+            if (!cookieNow.isNullOrBlank() && domain.isNotEmpty()) {
+                Settings.saveCookieForDomain(domain, cookieNow)
+            }
+            BCLog.d("[CF] post-interceptor ok for $domain")
             res.text
         } else {
-            BCLog.d("[CF] post-WebView GET returned ${res.code} for $domain")
+            BCLog.d("[CF] post-interceptor GET ${res.code} for $domain")
             null
         }
     } catch (e: Exception) {
-        BCLog.e("[CF] post-WebView GET failed for $domain: ${e.message}")
+        BCLog.e("[CF] interceptor failed for $domain: ${e.message}")
         null
     }
+}
+
+suspend fun cloudflareGetDoc(url: String, referer: String? = null): Document? {
+    val html = cloudflareGet(url, referer) ?: return null
+    return Jsoup.parse(html, url)
 }
