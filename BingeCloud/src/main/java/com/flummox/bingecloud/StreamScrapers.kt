@@ -126,7 +126,7 @@ private fun extractSeasons(title: String): Set<Int> {
     return out
 }
 
-private fun pageHasSeason(title: String, targetSeason: Int): Boolean {
+internal fun pageHasSeason(title: String, targetSeason: Int): Boolean {
     if (targetSeason <= 0) return true
     val seasons = extractSeasons(title)
     if (seasons.isEmpty()) return true
