@@ -1,234 +1,337 @@
 package com.flummox.bingecloud
 
+import android.util.Base64
 import com.lagradost.cloudstream3.app
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
-import java.net.URLEncoder
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.net.URI
+import java.security.MessageDigest
+import java.util.Locale
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
+import kotlin.random.Random
 
-// ═══════════════════════════════════════════════════════════════
-// ── MLSBD: Bangladeshi movie/series link directory ──
-// WordPress site. Search → movie page → savelinks.me redirect →
-// multicloudlinks page → player.php streamSrc / R2 direct.
-// Only mlsbd.co is CF-protected. savelinks.me is a plain 302.
-// ═══════════════════════════════════════════════════════════════
+private const val MB_SECRET_B64 = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
+private const val MB_SECRET_ALT_B64 = "Xqn2nnO41/L92o1iuXhSLHTbXvY4Z5ZZ62m8mSLA"
+private const val MB_VERSION_CODE = 50020126L
+private const val MB_VERSION_NAME = "4.0.02.0831.03"
+private const val MB_PACKAGE = "com.community.mbox.in"
+private const val MB_INSTALL_STORE = "official"
+private const val MB_UA = "com.community.mbox.in/50020126 (Linux; U; Android 14; en_IN; Pixel 8; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
-private const val MLSBD_BASE = "https://mlsbd.co"
+private val MB_HOSTS = listOf(
+    "api6.aoneroom.com", "api5.aoneroom.com", "api4.aoneroom.com",
+    "api4sg.aoneroom.com", "api3.aoneroom.com"
+)
 
-// Must match CloudflareShield.CF_UA — the CF cookie is validated
-// against the User-Agent that solved the challenge.
-private const val MLSBD_UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+private const val MB_BOOTSTRAP_HOST = "apig.inmoviebox.com"
+private const val MB_BOOTSTRAP_PATH = "/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4516404531735022304&page=1&perPage=1"
 
-private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
-    val host = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
-    val cookie = if (host.isNotBlank()) Settings.getCookieForDomain(host) else null
-    val headers = mutableMapOf(
-        "User-Agent" to MLSBD_UA,
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language" to "en-US,en;q=0.9"
+private val mbDeviceIdLock = Any()
+private var mbDeviceIdCache: String? = null
+
+private fun deviceId(): String {
+    return mbDeviceIdCache ?: synchronized(mbDeviceIdLock) {
+        mbDeviceIdCache ?: run {
+            val bytes = ByteArray(16)
+            Random.nextBytes(bytes)
+            bytes.joinToString("") { "%02x".format(it) }.also { mbDeviceIdCache = it }
+        }
+    }
+}
+
+private fun clientInfo(): String {
+    return """{"package_name":"$MB_PACKAGE","version_name":"$MB_VERSION_NAME","version_code":$MB_VERSION_CODE,"os":"android","os_version":"14","device_id":"${deviceId()}","install_store":"$MB_INSTALL_STORE","gaid":"1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d","brand":"Google","model":"Pixel 8","system_language":"en","net":"NETWORK_WIFI","region":"IN","timezone":"Asia/Calcutta","sp_code":""}"""
+}
+
+private fun md5Hex(data: ByteArray): String =
+    MessageDigest.getInstance("MD5").digest(data).joinToString("") { "%02x".format(it) }
+
+private fun b64DecodeBytes(s: String): ByteArray = Base64.decode(s, Base64.DEFAULT)
+private fun b64Encode(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
+
+private val SECRET_KEY_BYTES: ByteArray by lazy { b64DecodeBytes(MB_SECRET_B64) }
+private val SECRET_KEY_ALT_BYTES: ByteArray by lazy { b64DecodeBytes(MB_SECRET_ALT_B64) }
+
+private fun generateXClientToken(ts: Long): String {
+    val tsStr = ts.toString()
+    return "$tsStr,${md5Hex(tsStr.reversed().toByteArray(Charsets.UTF_8))}"
+}
+
+private fun buildCanonicalString(method: String, accept: String?, contentType: String?, url: String, body: String?, timestamp: Long): String {
+    val parsed = try { URI(url) } catch (_: Exception) { null }
+    val path = parsed?.path ?: ""
+    val query = parsed?.query?.takeIf { it.isNotBlank() }?.let { q ->
+        q.split("&").mapNotNull { p ->
+            val parts = p.split("=")
+            if (parts.isEmpty()) null else parts[0] to (parts.getOrNull(1) ?: "")
+        }.sortedBy { it.first }.joinToString("&") { (k, v) -> "$k=$v" }
+    } ?: ""
+    val canonicalUrl = if (query.isNotEmpty()) "$path?$query" else path
+    val bodyBytes = body?.toByteArray(Charsets.UTF_8)
+    val bodyHash = if (bodyBytes != null) {
+        val trimmed = if (bodyBytes.size > 0x19000) bodyBytes.copyOfRange(0, 0x19000) else bodyBytes
+        md5Hex(trimmed)
+    } else ""
+    val bodyLength = bodyBytes?.size?.toString() ?: ""
+    return "${method.uppercase(Locale.ROOT)}\n${accept ?: ""}\n${contentType ?: ""}\n$bodyLength\n$timestamp\n$bodyHash\n$canonicalUrl"
+}
+
+private fun generateXTrSignature(method: String, accept: String?, contentType: String?, url: String, body: String?, useAltKey: Boolean = false, ts: Long = System.currentTimeMillis()): String {
+    val canonical = buildCanonicalString(method, accept, contentType, url, body, ts)
+    val secret = if (useAltKey) SECRET_KEY_ALT_BYTES else SECRET_KEY_BYTES
+    val mac = Mac.getInstance("HmacMD5")
+    mac.init(SecretKeySpec(secret, "HmacMD5"))
+    return "$ts|2|${b64Encode(mac.doFinal(canonical.toByteArray(Charsets.UTF_8)))}"
+}
+
+private fun buildHeaders(method: String, url: String, contentType: String, accept: String, body: String?, bearer: String?): Map<String, String> {
+    val ts = System.currentTimeMillis()
+    val map = mutableMapOf(
+        "user-agent" to MB_UA,
+        "accept" to accept,
+        "content-type" to contentType,
+        "connection" to "keep-alive",
+        "x-client-token" to generateXClientToken(ts),
+        "x-tr-signature" to generateXTrSignature(method, accept, contentType, url, body, false, ts),
+        "x-client-info" to clientInfo(),
+        "x-client-status" to "0"
     )
-    if (!referer.isNullOrBlank()) headers["Referer"] = referer
-    if (!cookie.isNullOrBlank()) headers["Cookie"] = cookie
-    return try {
-        val res = app.get(url, headers = headers)
-        if (res.code !in 200..299) {
-            BCLog.d("MLSBD fetch $url → HTTP ${res.code}")
-            null
-        } else res.text
-    } catch (e: Exception) {
-        BCLog.e("MLSBD fetch failed for ${url.take(60)}: ${e.message}"); null
+    if (!bearer.isNullOrBlank()) map["Authorization"] = "Bearer $bearer"
+    return map
+}
+
+private var mbSession: String? = null
+
+private fun parseJwtExp(token: String): Long = try {
+    val parts = token.split(".")
+    if (parts.size != 3) 0L else {
+        val padding = when (parts[1].length % 4) { 2 -> "=="; 3 -> "="; else -> "" }
+        val decoded = Base64.decode(parts[1] + padding, Base64.URL_SAFE or Base64.NO_WRAP)
+        JSONObject(String(decoded)).optLong("exp", 0L) * 1000L
+    }
+} catch (_: Exception) { 0L }
+
+fun restoreMbSession() {
+    val tok = Settings.getMbToken() ?: return
+    if (Settings.getMbTokenExp() > System.currentTimeMillis() + 60 * 60 * 1000L) {
+        mbSession = tok
+        BCLog.d("MB session restored (exp in ${(Settings.getMbTokenExp() - System.currentTimeMillis()) / 60000}min)")
     }
 }
 
-data class MlsbdHit(val url: String, val title: String, val poster: String?)
+private suspend fun bootstrapToken(): String? {
+    val url = "https://$MB_BOOTSTRAP_HOST$MB_BOOTSTRAP_PATH"
+    return try {
+        val res = app.get(url, headers = buildHeaders("GET", url, "application/json", "application/json", null, null))
+        if (res.code !in 200..299) return null
+        val xUser = res.headers["x-user"] ?: res.headers["X-User"] ?: return null
+        val tok = JSONObject(xUser).optString("token").takeIf { it.isNotBlank() }
+        if (tok != null) {
+            mbSession = tok
+            val exp = parseJwtExp(tok)
+            if (exp > 0) Settings.saveMbToken(tok, exp)
+        }
+        tok
+    } catch (e: Exception) { BCLog.e("MB bootstrap failed: ${e.message}"); null }
+}
 
-suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
-    val url = "$MLSBD_BASE/?s=${URLEncoder.encode(query, "UTF-8")}"
-    val html = mlsbdFetch(url, referer = MLSBD_BASE) ?: return emptyList()
-    val doc = Jsoup.parse(html, url)
+private suspend fun ensureSession(): String? {
+    mbSession?.let { return it }
+    restoreMbSession()
+    mbSession?.let { return it }
+    return bootstrapToken()
+}
 
-    val out = mutableListOf<MlsbdHit>()
-    for (card in doc.select("div.single-post")) {
-        val a = card.selectFirst("div.thumb a[href]")
-            ?: card.selectFirst("div.post-desc a[href]")
-            ?: continue
-        val titleEl = card.selectFirst("h2.post-title")
-            ?: card.selectFirst("h2")
-            ?: continue
-        val href = a.attr("href").takeIf { it.startsWith("http") } ?: continue
-        val title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: continue
-        val poster = card.selectFirst("div.thumb img[src]")?.attr("src")
-            ?.takeIf { it.startsWith("http") }
-        out.add(MlsbdHit(href, title, poster))
+private suspend fun mbGet(path: String, query: String? = null, retried: Boolean = false): JSONObject? {
+    val cacheKey = "mb:get:$path?${query ?: ""}"
+    BCCache.get(cacheKey)?.let { return try { JSONObject(it) } catch (_: Exception) { null } }
+
+    val session = ensureSession() ?: run { BCLog.e("MB: no session for GET $path"); return null }
+    for (host in MB_HOSTS) {
+        try {
+            val fullUrl = if (query.isNullOrBlank()) "https://$host$path" else "https://$host$path?$query"
+            val res = app.get(fullUrl, headers = buildHeaders("GET", fullUrl, "application/json", "application/json", null, session))
+            if (res.code in 200..299) {
+                BCCache.put(cacheKey, res.text)
+                return try { JSONObject(res.text) } catch (e: Exception) { BCLog.e("MB JSON parse: ${e.message}"); null }
+            }
+            if ((res.code == 401 || res.code == 403 || res.code == 441) && !retried) {
+                mbSession = null
+                return mbGet(path, query, true)
+            }
+        } catch (e: Exception) { BCLog.e("MB GET $host err: ${e.message}") }
     }
-    BCLog.d("MLSBD search '$query' → ${out.size}")
+    return null
+}
+
+data class MBSubject(val subjectId: String, val title: String, val year: Int?, val type: Int)
+data class MBStream(
+    val url: String,
+    val realUrl: String,
+    val quality: String,
+    val size: String?,
+    val signCookie: String? = null,
+    val audio: String? = null,
+    val durationSec: Long = 0L,
+    val captions: List<Pair<String, String>> = emptyList()
+)
+
+private fun extractPolicyResource(signCookie: String?): String? {
+    if (signCookie.isNullOrBlank()) return null
+    val match = Regex("CloudFront-Policy=([^;]+)").find(signCookie) ?: return null
+    val policyRaw = match.groupValues[1]
+
+    var decoded: String? = null
+    val urlSafe = policyRaw.replace('-', '+').replace('~', '/').replace('_', '=')
+    val paddedUrlSafe = if (urlSafe.length % 4 > 0) urlSafe + "=".repeat(4 - urlSafe.length % 4) else urlSafe
+    decoded = try { String(Base64.decode(paddedUrlSafe, Base64.DEFAULT)) } catch (_: Exception) { null }
+
+    if (decoded == null) {
+        val std = policyRaw.replace('-', '+').replace('_', '/')
+        val paddedStd = if (std.length % 4 > 0) std + "=".repeat(4 - std.length % 4) else std
+        decoded = try { String(Base64.decode(paddedStd, Base64.DEFAULT)) } catch (_: Exception) { null }
+    }
+    if (decoded == null) return null
+
+    return try {
+        val root = JSONObject(decoded)
+        val statement = root.optJSONArray("Statement")?.optJSONObject(0) ?: return null
+        val resource = statement.optString("Resource").takeIf { it.isNotBlank() } ?: return null
+        val trimmed = resource.trimEnd('*', '/')
+        if (trimmed.endsWith(".mpd", true)) trimmed else "$trimmed/index.mpd"
+    } catch (e: Exception) {
+        BCLog.e("extractPolicyResource: ${e.message}"); null
+    }
+}
+
+suspend fun mbSearch(query: String, page: Int = 1): List<MBSubject> {
+    val cacheKey = "mb:search:$query:$page"
+    BCCache.get(cacheKey)?.let { return parseSearchResults(it) }
+
+    val session = ensureSession() ?: return emptyList()
+    val jsonBody = JSONObject().apply {
+        put("page", page)
+        put("perPage", 20)
+        put("keyword", query)
+        put("restrictKid", 1)
+    }.toString()
+
+    for (host in MB_HOSTS) {
+        try {
+            val url = "https://$host/wefeed-mobile-bff/subject-api/search/v2"
+            val res = app.post(url,
+                headers = buildHeaders("POST", url, "application/json; charset=utf-8", "application/json", jsonBody, session),
+                requestBody = jsonBody.toRequestBody(JSON_MEDIA))
+            if (res.code !in 200..299) {
+                if (res.code == 401 || res.code == 403 || res.code == 441) { mbSession = null; return mbSearch(query, page) }
+                continue
+            }
+            BCCache.put(cacheKey, res.text)
+            return parseSearchResults(res.text)
+        } catch (e: Exception) { BCLog.e("MB search $host err: ${e.message}") }
+    }
+    return emptyList()
+}
+
+private fun parseSearchResults(text: String): List<MBSubject> {
+    val json = try { JSONObject(text) } catch (_: Exception) { return emptyList() }
+    val results = json.optJSONObject("data")?.optJSONArray("results") ?: return emptyList()
+    val out = mutableListOf<MBSubject>()
+    for (i in 0 until results.length()) {
+        val subs = results.optJSONObject(i)?.optJSONArray("subjects") ?: continue
+        for (j in 0 until subs.length()) {
+            val s = subs.optJSONObject(j) ?: continue
+            val id = s.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
+            val title = s.optString("title").takeIf { it.isNotBlank() } ?: continue
+            out.add(MBSubject(id, title, null, s.optInt("subjectType", 1)))
+        }
+    }
+    BCLog.d("MB search: ${out.size} results")
     return out
 }
 
-suspend fun mlsbdFindPage(
-    title: String, year: String, type: String, season: Int
-): String? {
-    val hits = mlsbdSearch(title)
-    if (hits.isEmpty()) return null
+suspend fun mbDetail(subjectId: String): JSONObject? =
+    mbGet("/wefeed-mobile-bff/subject-api/get", "subjectId=$subjectId")
 
-    var best: MlsbdHit? = null
-    var bestScore = 0
-    for (h in hits) {
-        if (!titleMatches(title, h.title)) continue
-        var score = 1
-        if (year.isNotBlank() && h.title.contains(year)) score += 2
-        val l = h.title.lowercase()
-        if (type == "series") {
-            if (l.contains("season") || l.contains("s0") || l.contains("series")) score += 2
-            if (season > 0) {
-                if (pageHasSeason(h.title, season)) score += 2
-                else {
-                    BCLog.d("MLSBD skip wrong season: ${h.title.take(60)}")
-                    continue
-                }
-            }
-        } else {
-            if (!l.contains("season") && !l.contains("series")) score += 1
-        }
-        if (score > bestScore) { bestScore = score; best = h }
+suspend fun mbLanguages(originalSubjectId: String): List<Pair<String, String>> {
+    val detail = try { mbDetail(originalSubjectId) } catch (_: Exception) { null }
+    val dubs = detail?.optJSONObject("data")?.optJSONArray("dubs")
+
+    if (dubs == null || dubs.length() == 0) return listOf(originalSubjectId to "Original")
+
+    var originalLabel: String? = null
+    val dubEntries = mutableListOf<Pair<String, String>>()
+    for (i in 0 until dubs.length()) {
+        val d = dubs.optJSONObject(i) ?: continue
+        val id = d.optString("subjectId").takeIf { it.isNotBlank() } ?: continue
+        val lan = d.optString("lanName").takeIf { it.isNotBlank() } ?: continue
+        if (id == originalSubjectId) { originalLabel = lan; continue }
+        dubEntries.add(id to lan)
     }
-    val picked = best ?: return null
-    BCLog.d("MLSBD matched '${picked.title.take(80)}' (score=$bestScore)")
-    return picked.url
-}
-
-private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
-    return try {
-        val body = mlsbdFetch(savelinksUrl, referer = MLSBD_BASE) ?: return null
-        Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
-            .find(body)?.value
-            ?: Regex("""(?:window\.location|location\.href)\s*=\s*["']([^"']+)["']""")
-                .find(body)?.groupValues?.get(1)
-                ?.takeIf { it.contains("multicloudlinks") }
-    } catch (e: Exception) {
-        BCLog.d("MLSBD savelinks resolve failed: ${e.message}"); null
-    }
-}
-
-private suspend fun mlsbdExtractFromMulticloud(
-    multiUrl: String, quality: String
-): List<ScrapedMirror> {
-    val html = try {
-        app.get(multiUrl, headers = mapOf(
-            "User-Agent" to MLSBD_UA,
-            "Referer" to "https://savelinks.me/"
-        )).text
-    } catch (e: Exception) {
-        BCLog.d("MLSBD multicloud fetch failed: ${e.message}"); return emptyList()
-    }
-    val doc = Jsoup.parse(html, multiUrl)
-
-    val out = mutableListOf<ScrapedMirror>()
-
-    val playerUrl = doc.selectFirst("a.premium-btn[href*='player.php']")?.attr("href")
-    if (!playerUrl.isNullOrBlank()) {
-        val stream = mlsbdExtractPlayerStream(playerUrl)
-        if (stream != null) {
-            out.add(ScrapedMirror(quality, "MLSBD Player", stream, "MLSBD"))
-            BCLog.d("MLSBD player stream $quality → ${stream.take(80)}")
-        }
-    }
-
-    val r2Url = doc.select("a.premium-btn[href]").firstOrNull {
-        val t = it.text().lowercase()
-        t.contains("turbo download") || t.contains("(r2)")
-    }?.attr("href")?.takeIf { it.startsWith("http") }
-    if (r2Url != null) {
-        out.add(ScrapedMirror(quality, "MLSBD R2", r2Url, "MLSBD"))
-        BCLog.d("MLSBD R2 $quality → ${r2Url.take(80)}")
-    }
-
+    val out = mutableListOf<Pair<String, String>>()
+    out.add(originalSubjectId to (originalLabel ?: "Original"))
+    out.addAll(dubEntries)
+    BCLog.d("MB langs: ${out.map { it.second }}")
     return out
 }
 
-private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
-    return try {
-        val html = app.get(playerUrl, headers = mapOf(
-            "User-Agent" to MLSBD_UA,
-            "Referer" to "https://new2.multicloudlinks.com/"
-        )).text
-        val m = Regex("""const\s+streamSrc\s*=\s*"([^"]+)"""")
-            .find(html)
-        val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
-        if (url == null) {
-            BCLog.d("MLSBD player: no streamSrc in ${playerUrl.take(60)}")
-        }
-        url
-    } catch (e: Exception) {
-        BCLog.d("MLSBD player fetch failed: ${e.message}"); null
+suspend fun mbPlay(subjectId: String, season: Int = 0, episode: Int = 0, audioLabel: String? = null): List<MBStream> {
+    val q = "subjectId=$subjectId&se=$season&ep=$episode"
+    val json = mbGet("/wefeed-mobile-bff/subject-api/play-info", q) ?: return emptyList()
+    val root = json.optJSONObject("data") ?: json
+val arr = root.optJSONArray("streams") ?: root.optJSONArray("videos") ?: root.optJSONArray("list") ?: return emptyList()
+
+val captionsList = mutableListOf<Pair<String, String>>()
+val captionsArr = root.optJSONArray("captions")
+    ?: root.optJSONArray("subtitle")
+    ?: root.optJSONArray("subtitles")
+if (captionsArr != null) {
+    for (i in 0 until captionsArr.length()) {
+        val c = captionsArr.optJSONObject(i) ?: continue
+        val lang = c.optString("language").ifBlank { c.optString("lang") }.ifBlank { "Unknown" }
+        val url = c.optString("url").ifBlank { c.optString("file") }
+        if (url.isNotBlank()) captionsList.add(lang to url)
     }
 }
+if (captionsList.isNotEmpty()) BCLog.d("MB captions: ${captionsList.map { it.first }}")
 
-suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
-    val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: return emptyList()
-    val pageHtml = mlsbdFetch(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
-    val doc = Jsoup.parse(pageHtml, pageUrl)
+val out = mutableListOf<MBStream>()
+    for (i in 0 until arr.length()) {
+        val o = arr.optJSONObject(i) ?: continue
+        val url = o.optString("url").ifBlank { o.optString("playUrl").ifBlank { o.optString("src") } }
+        if (url.isBlank()) continue
+        val resolutionsStr = o.optString("resolutions").ifBlank { null }
+        val quality = resolutionsStr?.split(",")
+           ?.mapNotNull { it.trim().removeSuffix("p").removeSuffix("P").toIntOrNull() }
+           ?.maxOrNull()
+           ?.let { "${it}p" }
+           ?: o.optString("quality").ifBlank { "Auto" }
 
-    data class Section(val title: String, val links: List<Element>)
-    val sections = mutableListOf<Section>()
-    for (secDiv in doc.select("div.post-section-title.download")) {
-        val links = mutableListOf<Element>()
-        var sib = secDiv.nextElementSibling()
-        while (sib != null && !sib.hasClass("post-section-title")) {
-            if (sib.tagName() == "p") links.addAll(sib.select("a.Dbtn[href]"))
-            sib = sib.nextElementSibling()
-        }
-        sections.add(Section(secDiv.text(), links))
+        var dur = o.optLong("duration", 0L)
+        if (dur <= 0) dur = o.optLong("durationSeconds", 0L)
+        if (dur <= 0) dur = o.optLong("length", 0L)
+        if (dur <= 0) dur = o.optLong("durationMs", 0L).let { if (it > 0) it / 1000 else 0 }
+
+        val signCookie = o.optString("signCookie").ifBlank { null }
+        val realUrl = extractPolicyResource(signCookie) ?: url
+
+        val urlHead = realUrl.take(120)
+        BCLog.d("MB raw [$audioLabel] dur=${dur}s fmt=${o.optString("format")} codec=${o.optString("codecName")} size=${o.optString("size")} realUrl=$urlHead")
+
+        out.add(MBStream(
+    url = url,
+    realUrl = realUrl,
+    quality = quality,
+    size = o.optString("size").ifBlank { null },
+    signCookie = signCookie,
+    audio = audioLabel,
+    durationSec = dur,
+    captions = captionsList
+))
     }
-    BCLog.d("MLSBD sections: ${sections.size} on page")
-
-    val relevant: List<Section> = if (q.type == "series" && q.episode > 0) {
-        sections.filter { s ->
-            val m = Regex("""Epi-(\d+)-(\d+)""", RegexOption.IGNORE_CASE)
-                .find(s.title) ?: return@filter false
-            val start = m.groupValues[1].toIntOrNull() ?: return@filter false
-            val end = m.groupValues[2].toIntOrNull() ?: return@filter false
-            q.episode in start..end
-        }.take(1)
-    } else {
-        sections
-    }
-    if (relevant.isEmpty()) {
-        BCLog.d("MLSBD: no matching section for ${q.type} E${q.episode}")
-        return emptyList()
-    }
-
-    data class Job(val quality: String, val savelinks: String)
-    val jobs = mutableListOf<Job>()
-    for (sec in relevant) {
-        for (a in sec.links) {
-            val href = a.attr("href")
-            if (!href.contains("savelinks.me/view")) continue
-            val text = a.text().lowercase()
-            val quality = when {
-                text.contains("4k") || text.contains("2160") -> "2160p"
-                text.contains("1080") -> "1080p"
-                text.contains("720") -> "720p"
-                text.contains("480") -> "480p"
-                else -> continue
-            }
-            if (quality == "480p") continue
-            jobs.add(Job(quality, href))
-        }
-    }
-    BCLog.d("MLSBD savelinks jobs: ${jobs.size}")
-
-    val out = mutableListOf<ScrapedMirror>()
-    val seen = mutableSetOf<String>()
-    for (j in jobs) {
-        val key = "${j.quality}|${j.savelinks}"
-        if (!seen.add(key)) continue
-        val multiUrl = mlsbdResolveSavelinks(j.savelinks) ?: continue
-        BCLog.d("MLSBD ${j.quality} → ${multiUrl.take(90)}")
-        out.addAll(mlsbdExtractFromMulticloud(multiUrl, j.quality))
-    }
-
-    BCLog.d("MLSBD: ${out.size} total mirrors")
+    BCLog.d("MB play [$audioLabel]: ${out.size} streams")
     return out
 }
