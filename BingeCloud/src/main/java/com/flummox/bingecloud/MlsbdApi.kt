@@ -7,45 +7,23 @@ import java.net.URLEncoder
 
 // ═══════════════════════════════════════════════════════════════
 // ── MLSBD: Bangladeshi movie/series link directory ──
-// WordPress site. Search → movie page → savelinks.me redirect →
-// multicloudlinks page → player.php streamSrc / R2 direct.
-// Only mlsbd.co is CF-protected. savelinks.me is a plain 302.
+// WordPress site. CF-protected. All fetches go through
+// CloudStream's cloudflareGet (framework handles cookie jar
+// syncing between WebView and OkHttp).
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
 
-// Must match CloudflareShield.CF_UA — the CF cookie is validated
-// against the User-Agent that solved the challenge.
-private const val MLSBD_UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
-
-private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
-    val host = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
-    val cookie = if (host.isNotBlank()) Settings.getCookieForDomain(host) else null
-    val headers = mutableMapOf(
-        "User-Agent" to MLSBD_UA,
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language" to "en-US,en;q=0.9"
-    )
-    if (!referer.isNullOrBlank()) headers["Referer"] = referer
-    if (!cookie.isNullOrBlank()) headers["Cookie"] = cookie
-    return try {
-        val res = app.get(url, headers = headers)
-        if (res.code !in 200..299) {
-            BCLog.d("MLSBD fetch $url → HTTP ${res.code}")
-            null
-        } else res.text
-    } catch (e: Exception) {
-        BCLog.e("MLSBD fetch failed for ${url.take(60)}: ${e.message}"); null
-    }
-}
-
 data class MlsbdHit(val url: String, val title: String, val poster: String?)
 
+// ── search (CF-protected) ──
 suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
     val url = "$MLSBD_BASE/?s=${URLEncoder.encode(query, "UTF-8")}"
-    val html = mlsbdFetch(url, referer = MLSBD_BASE) ?: return emptyList()
+    val html = try {
+        cloudflareGet(url, referer = MLSBD_BASE)
+    } catch (e: Exception) {
+        BCLog.e("MLSBD search failed: ${e.message}"); return emptyList()
+    } ?: return emptyList()
     val doc = Jsoup.parse(html, url)
 
     val out = mutableListOf<MlsbdHit>()
@@ -66,6 +44,7 @@ suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
     return out
 }
 
+// ── find best-matching movie/series page ──
 suspend fun mlsbdFindPage(
     title: String, year: String, type: String, season: Int
 ): String? {
@@ -98,19 +77,29 @@ suspend fun mlsbdFindPage(
     return picked.url
 }
 
+// ── resolve savelinks.me → multicloudlinks URL ──
+// savelinks.me is NOT CF-protected — it's a plain 302 redirect.
+// Plain app.get is correct here.
 private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
     return try {
-        val body = mlsbdFetch(savelinksUrl, referer = MLSBD_BASE) ?: return null
-        Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
-            .find(body)?.value
-            ?: Regex("""(?:window\.location|location\.href)\s*=\s*["']([^"']+)["']""")
-                .find(body)?.groupValues?.get(1)
-                ?.takeIf { it.contains("multicloudlinks") }
+        val res = app.get(savelinksUrl, allowRedirects = false,
+            headers = mapOf("User-Agent" to MLSBD_UA))
+        val loc = res.headers["Location"]
+        if (!loc.isNullOrBlank() && loc.contains("multicloudlinks")) {
+            loc
+        } else {
+            // fallback: parse body for meta refresh or JS redirect
+            val body = res.text
+            Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
+                .find(body)?.value
+        }
     } catch (e: Exception) {
         BCLog.d("MLSBD savelinks resolve failed: ${e.message}"); null
     }
 }
 
+// ── extract mirrors from multicloudlinks page ──
+// NOT CF-protected. Plain app.get.
 private suspend fun mlsbdExtractFromMulticloud(
     multiUrl: String, quality: String
 ): List<ScrapedMirror> {
@@ -126,6 +115,7 @@ private suspend fun mlsbdExtractFromMulticloud(
 
     val out = mutableListOf<ScrapedMirror>()
 
+    // 1. player.php → fetch and extract streamSrc
     val playerUrl = doc.selectFirst("a.premium-btn[href*='player.php']")?.attr("href")
     if (!playerUrl.isNullOrBlank()) {
         val stream = mlsbdExtractPlayerStream(playerUrl)
@@ -135,6 +125,7 @@ private suspend fun mlsbdExtractFromMulticloud(
         }
     }
 
+    // 2. R2 direct download — playable as-is
     val r2Url = doc.select("a.premium-btn[href]").firstOrNull {
         val t = it.text().lowercase()
         t.contains("turbo download") || t.contains("(r2)")
@@ -147,6 +138,7 @@ private suspend fun mlsbdExtractFromMulticloud(
     return out
 }
 
+// ── fetch player.php and extract streamSrc ──
 private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     return try {
         val html = app.get(playerUrl, headers = mapOf(
@@ -165,9 +157,16 @@ private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ── ENTRY POINT ──
+// ═══════════════════════════════════════════════════════════════
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: return emptyList()
-    val pageHtml = mlsbdFetch(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
+    val pageHtml = try {
+        cloudflareGet(pageUrl, referer = MLSBD_BASE)
+    } catch (e: Exception) {
+        BCLog.e("MLSBD page fetch failed: ${e.message}"); return emptyList()
+    } ?: return emptyList()
     val doc = Jsoup.parse(pageHtml, pageUrl)
 
     data class Section(val title: String, val links: List<Element>)
