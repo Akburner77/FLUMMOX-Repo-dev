@@ -7,12 +7,18 @@ import java.net.URLEncoder
 
 // ═══════════════════════════════════════════════════════════════
 // ── MLSBD: Bangladeshi movie/series link directory ──
-// WordPress site. CF-protected. All fetches go through
-// CloudStream's cloudflareGet (framework handles cookie jar
-// syncing between WebView and OkHttp).
+// WordPress site. CF-protected. All mlsbd.co fetches go through
+// CloudStream's cloudflareGet (framework handles cookie jar).
+// savelinks.me is a plain 302, not CF. multicloudlinks is not CF.
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
+
+// Must match CloudflareShield.CF_UA — the CF cookie is validated
+// against the User-Agent that solved the challenge.
+private const val MLSBD_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 
 data class MlsbdHit(val url: String, val title: String, val poster: String?)
 
@@ -79,16 +85,17 @@ suspend fun mlsbdFindPage(
 
 // ── resolve savelinks.me → multicloudlinks URL ──
 // savelinks.me is NOT CF-protected — it's a plain 302 redirect.
-// Plain app.get is correct here.
 private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
     return try {
-        val res = app.get(savelinksUrl, allowRedirects = false,
-            headers = mapOf("User-Agent" to MLSBD_UA))
+        val res = app.get(
+            savelinksUrl,
+            allowRedirects = false,
+            headers = mapOf("User-Agent" to MLSBD_UA)
+        )
         val loc = res.headers["Location"]
         if (!loc.isNullOrBlank() && loc.contains("multicloudlinks")) {
             loc
         } else {
-            // fallback: parse body for meta refresh or JS redirect
             val body = res.text
             Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
                 .find(body)?.value
@@ -99,7 +106,7 @@ private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
 }
 
 // ── extract mirrors from multicloudlinks page ──
-// NOT CF-protected. Plain app.get.
+// Not CF-protected. Plain app.get.
 private suspend fun mlsbdExtractFromMulticloud(
     multiUrl: String, quality: String
 ): List<ScrapedMirror> {
@@ -115,7 +122,6 @@ private suspend fun mlsbdExtractFromMulticloud(
 
     val out = mutableListOf<ScrapedMirror>()
 
-    // 1. player.php → fetch and extract streamSrc
     val playerUrl = doc.selectFirst("a.premium-btn[href*='player.php']")?.attr("href")
     if (!playerUrl.isNullOrBlank()) {
         val stream = mlsbdExtractPlayerStream(playerUrl)
@@ -125,7 +131,6 @@ private suspend fun mlsbdExtractFromMulticloud(
         }
     }
 
-    // 2. R2 direct download — playable as-is
     val r2Url = doc.select("a.premium-btn[href]").firstOrNull {
         val t = it.text().lowercase()
         t.contains("turbo download") || t.contains("(r2)")
