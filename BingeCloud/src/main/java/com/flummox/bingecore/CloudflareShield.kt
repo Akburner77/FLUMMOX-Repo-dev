@@ -131,7 +131,18 @@ object CloudflareShield {
                     settings.userAgentString =
                         "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
                         "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                    webViewClient = WebViewClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                          
+                            // center the CF widget by scrolling body
+                            view?.evaluateJavascript(
+                                "(function(){var h=document.body.scrollHeight;" +
+                                "window.scrollTo(0,(h-window.innerHeight)/2);})();",
+                                 null
+                             )
+                         }
+                    }
                     webChromeClient = WebChromeClient()
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -179,8 +190,9 @@ object CloudflareShield {
 
                 dlg.setContentView(card)
                 val w = dp(ctx, 380)
-                val smallH = dp(ctx, 200)
+                val smallH = dp(ctx, 130)
                 val bigH = dp(ctx, 520)
+                dlg.window?.setLayout(w, smallH)
                 dlg.window?.setLayout(w, smallH)
                 dlg.window?.setBackgroundDrawableResource(android.R.color.transparent)
                 dlg.setCancelable(false)
@@ -206,9 +218,9 @@ object CloudflareShield {
                             return
                         }
                         val elapsed = System.currentTimeMillis() - start
-                        if (!grown && elapsed > 3500) {
-                            grown = true
-                            dlg.window?.setLayout(w, bigH)
+                        if (!grown && elapsed > 4000) {
+                           grown = true
+                           dlg.window?.setLayout(w, bigH)
                         }
                         if (elapsed > maxMs) {
                             BCLog.d("[CF Shield] $domain timed out after 60s")
