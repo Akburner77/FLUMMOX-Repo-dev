@@ -6,14 +6,6 @@ import java.net.URLEncoder
 
 const val AIOMETA_BASE = "https://aiometadata.elfhosted.com/stremio/9197a4a9-2f5b-4911-845e-8704c520bdf7"
 
-
-private fun isAdultContent(title: String, genres: List<String>?): Boolean {
-    val t = title.lowercase()
-    if (ADULT_TERMS.any { t.contains(it) }) return true
-    if (genres != null && genres.any { it.lowercase().trim() in setOf("T4", "adult", "18+") }) return true
-    return false
-}
-
 // ── data models ──
 data class AioCast(val name: String? = null, val character: String? = null, val photo: String? = null)
 
@@ -79,6 +71,8 @@ suspend fun aioFetchCatalog(
     return try {
         val extras = StringBuilder()
         if (!param.isNullOrBlank()) {
+            // ── if value looks like "key=val", split and encode the value side ──
+            // ── if bare value, fall back to legacy genre= param ──
             val eq = param.indexOf('=')
             if (eq > 0) {
                 val key = param.substring(0, eq).trim()
@@ -94,9 +88,7 @@ suspend fun aioFetchCatalog(
 
         val url = "$AIOMETA_BASE/catalog/$type/$catalogId/$extras.json"
         val json = app.get(url).text
-        tryParseJson<AioCatalogResponse>(json)?.metas
-            ?.filter { !isAdultContent(it.name ?: "", it.genres) }
-            ?: emptyList()
+        tryParseJson<AioCatalogResponse>(json)?.metas ?: emptyList()
     } catch (e: Exception) {
         emptyList()
     }
@@ -112,9 +104,7 @@ suspend fun aioSearch(query: String, type: String): List<AioMeta> {
         }
         val url = "$AIOMETA_BASE/catalog/$type/$catalogId/search=$encoded.json"
         val json = app.get(url).text
-        tryParseJson<AioCatalogResponse>(json)?.metas
-            ?.filter { !isAdultContent(it.name ?: "", it.genres) }
-            ?: emptyList()
+        tryParseJson<AioCatalogResponse>(json)?.metas ?: emptyList()
     } catch (e: Exception) {
         emptyList()
     }
@@ -176,7 +166,6 @@ suspend fun tmdbDiscoverMerged(providerId: Int, skip: Int): List<AioMeta> {
 private fun TmdbDiscoverItem.toAioMeta(tmdbType: String): AioMeta? {
     val itemId = id ?: return null
     val itemName = title ?: name ?: return null
-    if (isAdultContent(itemName, null)) return null
     val dateStr = release_date ?: first_air_date
     val yearStr = dateStr?.take(4)
     return AioMeta(
