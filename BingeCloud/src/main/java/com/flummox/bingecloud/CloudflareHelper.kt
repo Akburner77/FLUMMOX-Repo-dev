@@ -4,7 +4,6 @@ import android.content.Context
 import android.webkit.CookieManager
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.network.WebViewResolver
-import kotlinx.coroutines.delay
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.net.URI
@@ -93,51 +92,5 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
     } catch (e: Exception) {
         BCLog.e("[CF] post-WebView GET failed for $domain: ${e.message}")
         null
-    }
-}
-
-suspend fun cloudflareGetDoc(url: String, referer: String? = null): Document? {
-    val html = cloudflareGet(url, referer) ?: return null
-    return Jsoup.parse(html, url)
-}
-
-// ── WebView-based cookie acquisition ──
-// Polls CookieManager for cf_clearance up to 30s after the
-// resolver starts. The resolver itself returns when the page
-// loads — we then wait for the challenge to actually finish.
-private suspend fun resolveWithWebView(url: String) {
-    try {
-        val host = try { URI(url).host ?: "" } catch (_: Exception) { "" }
-        val interceptRegex = if (host.isNotEmpty())
-            Regex(".*${Regex.escape(host)}.*")
-        else Regex(".*")
-
-        val resolver = WebViewResolver(
-            interceptUrl = interceptRegex,
-            additionalUrls = emptyList(),   // critical: do NOT list challenge URLs
-            userAgent = CF_UA,
-            useOkhttp = false,
-            timeout = 30_000L
-        )
-
-        try {
-            resolver.resolveUsingWebView(url)
-        } catch (e: Exception) {
-            BCLog.d("[CF] resolver threw: ${e.message}")
-        }
-
-        // poll for cf_clearance — WebView keeps running in background
-        val deadline = System.currentTimeMillis() + 30_000L
-        while (System.currentTimeMillis() < deadline) {
-            val cookie = CookieManager.getInstance().getCookie(url) ?: ""
-            if (cookie.contains("cf_clearance")) {
-                BCLog.d("[CF] cf_clearance found for $host")
-                return
-            }
-            delay(500L)
-        }
-        BCLog.d("[CF] cf_clearance never appeared for $host")
-    } catch (e: Exception) {
-        BCLog.e("[CF] WebViewResolver failed: ${e.message}")
     }
 }
