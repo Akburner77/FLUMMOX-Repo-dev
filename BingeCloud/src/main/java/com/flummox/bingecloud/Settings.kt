@@ -1200,35 +1200,26 @@ run {
         "Saves cookies for every CF domain in one go",
         "Bypass"
     ) {
-        val d = AlertDialog.Builder(ctx)
-            .setTitle("Bypass Cloudflare")
-            .setMessage("A small window will open for each site. Solve the checkbox when it appears.")
-            .setPositiveButton("Start") { _, _ ->
-                val src = CloudflareShield.GROUPS.keys.firstOrNull() ?: return@setPositiveButton
-                val domains = CloudflareShield.GROUPS[src] ?: return@setPositiveButton
-                val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
-                scope.launch {
-                    var ok = 0
-                    for ((idx, dm) in domains.withIndex()) {
-                        Toast.makeText(ctx,
-                            "Bypassing ${idx + 1}/${domains.size}: $dm",
-                            Toast.LENGTH_SHORT).show()
-                        if (CloudflareShield.bypassDomain(ctx, dm)) ok++
-                        kotlinx.coroutines.delay(200)
-                    }
-                    Toast.makeText(ctx,
-                        if (ok == domains.size) "✓ All protected"
-                        else "Protected $ok / ${domains.size}",
-                        Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                    showSettingsDialog(ctx, onSaved)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        d.setCancelable(false)
-        d.show()
-    })
+            val src = CloudflareShield.GROUPS.keys.firstOrNull() ?: return@actionRow
+    val domains = CloudflareShield.GROUPS[src] ?: return@actionRow
+    val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
+    scope.launch {
+        var ok = 0
+        for ((idx, dm) in domains.withIndex()) {
+            Toast.makeText(ctx,
+                "Bypassing ${idx + 1}/${domains.size}: $dm",
+                Toast.LENGTH_SHORT).show()
+            if (CloudflareShield.bypassDomain(ctx, dm)) ok++
+            kotlinx.coroutines.delay(200)
+        }
+        Toast.makeText(ctx,
+            if (ok == domains.size) "✓ All protected"
+            else "Protected $ok / ${domains.size}",
+            Toast.LENGTH_SHORT).show()
+        dialog.dismiss()
+        showSettingsDialog(ctx, onSaved)
+    }
+})
 
     // Clear all
     c.body.addView(actionRow(
@@ -1272,11 +1263,85 @@ run {
         }
     }
 
-    // add custom domain
-    c.body.addView(actionRow(
-        ctx, "Add custom domain", "Open any URL to solve CF",
-        "Add"
-    ) { openCfWebView(ctx, "https://www.febbox.com", "febbox.com") })
+    // add custom domain — text input
+c.body.addView(actionRow(
+    ctx, "Add custom domain", "Enter a domain to protect",
+    "Add"
+) {
+    val input = EditText(ctx).apply {
+        setTextColor(TEXT)
+        setHintTextColor(SUBTEXT)
+        hint = "example.com"
+        textSize = 14f
+        background = bg(INPUT, 8, ctx)
+        setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    }
+    val wrap = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        background = cardBg(ctx)
+        setPadding(dp(ctx, 22), dp(ctx, 22), dp(ctx, 22), dp(ctx, 16))
+    }
+    wrap.addView(TextView(ctx).apply {
+        text = "Add domain"
+        setTextColor(TEXT)
+        textSize = 17f
+        setTypeface(typeface, Typeface.BOLD)
+    })
+    wrap.addView(TextView(ctx).apply {
+        text = "Enter the domain without https:// — e.g. example.com"
+        setTextColor(SUBTEXT)
+        textSize = 13f
+        setPadding(0, dp(ctx, 12), 0, dp(ctx, 12))
+    })
+    wrap.addView(input, LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    ))
+    val inputDlg = AlertDialog.Builder(ctx).create()
+    val btnRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.END
+        setPadding(0, dp(ctx, 20), 0, 0)
+    }
+    btnRow.addView(Button(ctx).apply {
+        text = "Cancel"
+        textSize = 14f
+        setTextColor(TEXT)
+        background = bg(ROW, 14, ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        setOnClickListener { inputDlg.dismiss() }
+    })
+    btnRow.addView(Button(ctx).apply {
+        text = "Save"
+        textSize = 14f
+        setTextColor(0xFF0A0D14.toInt())
+        background = saveButtonBg(ctx)
+        isAllCaps = false
+        setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10))
+        minHeight = 0; minWidth = 0
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { leftMargin = dp(ctx, 8) }
+        setOnClickListener {
+            val raw = input.text?.toString()?.trim().orEmpty()
+                .removePrefix("https://").removePrefix("http://")
+                .substringBefore("/").lowercase()
+            if (raw.isBlank() || !raw.contains(".")) {
+                Toast.makeText(ctx, "Invalid domain", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            inputDlg.dismiss()
+            openCfWebView(ctx, "https://$raw", raw)
+        }
+    })
+    wrap.addView(btnRow)
+    inputDlg.setView(wrap)
+    inputDlg.window?.setBackgroundDrawable(cardBg(ctx))
+    inputDlg.show()
+})
 
     body.addView(c.root)
 }
@@ -1341,11 +1406,16 @@ run {
 
         // ── SOURCES ──
         run {
-            val on = listOf(isSrcVm(), isSrcMd(), isSrcHdh(), isSrcMovieBox(), isSrcAnikoto(), isSrcShowBox()).count { it }
-            val c = buildCard(
-                ctx, "📡", "Sources", "$on of 6 enabled",
-                badge = "$on/6"
-            )
+            val all = listOf(
+                isSrcVm(), isSrcMd(), isSrcHdh(),
+                isSrcMovieBox(), isSrcAnikoto(), isSrcShowBox(), isSrcMlsbd()
+             )
+             val on = all.count { it }
+             val total = all.size
+             val c = buildCard(
+                 ctx, "📡", "Sources", "$on of $total enabled",
+                 badge = "$on/$total"
+             )
             c.body.addView(toggleRow(ctx, "VegaMovies", null, isSrcVm()) { setKey(K_SRC_VM, it) })
             c.body.addView(toggleRow(ctx, "MoviesDrive", null, isSrcMd()) { setKey(K_SRC_MD, it) })
             c.body.addView(toggleRow(ctx, "HDhub4u", null, isSrcHdh()) { setKey(K_SRC_HDH, it) })
