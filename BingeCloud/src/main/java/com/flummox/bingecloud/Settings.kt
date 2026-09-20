@@ -1220,7 +1220,7 @@ run {
                         if (ok == domains.size) "✓ All protected"
                         else "Protected $ok / ${domains.size}",
                         Toast.LENGTH_SHORT).show()
-                    dlg.dismiss()
+                    dialog.dismiss()
                     showSettingsDialog(ctx, onSaved)
                 }
             }
