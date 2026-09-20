@@ -14,8 +14,6 @@ import java.net.URLEncoder
 
 private const val MLSBD_BASE = "https://mlsbd.co"
 
-// Must match CloudflareShield.CF_UA — the CF cookie is validated
-// against the User-Agent that solved the challenge.
 private const val MLSBD_UA =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
@@ -84,7 +82,6 @@ suspend fun mlsbdFindPage(
 }
 
 // ── resolve savelinks.me → multicloudlinks URL ──
-// savelinks.me is NOT CF-protected — it's a plain 302 redirect.
 private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
     return try {
         val res = app.get(
@@ -106,7 +103,6 @@ private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
 }
 
 // ── extract mirrors from multicloudlinks page ──
-// Not CF-protected. Plain app.get.
 private suspend fun mlsbdExtractFromMulticloud(
     multiUrl: String, quality: String
 ): List<ScrapedMirror> {
@@ -233,6 +229,6 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         out.addAll(mlsbdExtractFromMulticloud(multiUrl, j.quality))
     }
 
-    BCLog.d("MLSBD: ${out.size} total mirrors")
+    BCLog.d("MLSBD: ${out.total} total mirrors")
     return out
 }
