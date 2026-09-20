@@ -1116,45 +1116,169 @@ private class NightCloudsView(context: Context) : View(context) {
             body.addView(c.root)
         }
 
-        // ── CLOUDFLARE BYPASS ──
-        run {
-            val saved = getCfDomains()
-            val c = buildCard(
-                ctx, "🛡️", "Cloudflare Bypass",
-                subtitle = if (saved.isEmpty()) "No domains configured"
-                else "${saved.size} domain(s)",
-                badge = if (saved.isNotEmpty()) "✓ ${saved.size}" else null,
-                badgeColor = GREEN
-            )
-            c.body.addView(labelBlock(ctx, "Protected sites",
-                "Open a WebView, solve the challenge, tap Save Cookies."))
-            if (saved.isEmpty()) {
-                c.body.addView(TextView(ctx).apply {
-                    text = "No domains saved yet. Add one below."
-                    setTextColor(SUBTEXT); textSize = 12f
-                    setPadding(dp(ctx, 14), dp(ctx, 8), dp(ctx, 14), dp(ctx, 8))
-                })
-            } else {
-                for (domain in saved) {
-                    val has = getCookieForDomain(domain) != null
-                    c.body.addView(domainRow(
-                        ctx, domain, has,
-                        onOpen = { openCfWebView(ctx, "https://$domain", domain) },
-                        onClear = {
-                            clearCookieForDomain(domain)
-                            Toast.makeText(ctx, "Cleared $domain", Toast.LENGTH_SHORT).show()
-                            dialog.dismiss()
-                            showSettingsDialog(ctx, onSaved)
-                        }
-                    ))
+        // ── CLOUDFLARE SHIELD ──
+run {
+    val c = buildCard(
+        ctx, "🛡️", "Cloudflare Shield",
+        subtitle = "One-tap bypass for all protected sources"
+    )
+
+    val pillHolder = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(ctx, 4), dp(ctx, 4), dp(ctx, 4), dp(ctx, 10))
+    }
+
+    fun renderPills() {
+        pillHolder.removeAllViews()
+        for ((sourceName, _) in CloudflareShield.GROUPS) {
+            val st = CloudflareShield.statusOf(sourceName)
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = bg(ROW, 12, ctx)
+                setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(ctx, 6) }
+            }
+            row.addView(TextView(ctx).apply {
+                text = when (st.state) {
+                    CloudflareShield.State.PROTECTED -> "🟢"
+                    CloudflareShield.State.PARTIAL -> "🟡"
+                    CloudflareShield.State.WORKING -> "🔄"
+                    else -> "🔴"
+                }
+                textSize = 16f
+                setPadding(0, 0, dp(ctx, 10), 0)
+            })
+            val col = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            col.addView(TextView(ctx).apply {
+                text = sourceName
+                setTextColor(TEXT)
+                textSize = 14f
+                setTypeface(typeface, Typeface.BOLD)
+            })
+            val sub = when (st.state) {
+                CloudflareShield.State.PROTECTED -> {
+                    val hours = if (st.earliestExpiryMs > 0) {
+                        ((st.earliestExpiryMs - System.currentTimeMillis()) / 3_600_000L).coerceAtLeast(0)
+                    } else -1L
+                    if (hours >= 0) "All protected · expires in ${hours}h"
+                    else "All protected"
+                }
+                CloudflareShield.State.PARTIAL -> "Some cookies expired"
+                CloudflareShield.State.WORKING -> "Bypassing…"
+                else -> "Not protected"
+            }
+            col.addView(TextView(ctx).apply {
+                text = sub
+                setTextColor(SUBTEXT)
+                textSize = 11f
+                setPadding(0, dp(ctx, 2), 0, 0)
+            })
+            row.addView(col)
+            row.addView(TextView(ctx).apply {
+                text = "${st.freshCount} / ${st.totalCount}"
+                setTextColor(ACCENT_STRONG)
+                textSize = 13f
+            })
+            pillHolder.addView(row)
+        }
+    }
+    renderPills()
+    c.body.addView(pillHolder)
+
+    // Bypass / Refresh
+    c.body.addView(actionRow(
+        ctx,
+        "Bypass all protected sources",
+        "Saves cookies for every CF domain in one go",
+        "Bypass"
+    ) {
+        val d = AlertDialog.Builder(ctx)
+            .setTitle("Bypass Cloudflare")
+            .setMessage("A small window will open for each site. Solve the checkbox when it appears.")
+            .setPositiveButton("Start") { _, _ ->
+                val src = CloudflareShield.GROUPS.keys.firstOrNull() ?: return@setPositiveButton
+                val domains = CloudflareShield.GROUPS[src] ?: return@setPositiveButton
+                val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
+                scope.launch {
+                    var ok = 0
+                    for ((idx, dm) in domains.withIndex()) {
+                        Toast.makeText(ctx,
+                            "Bypassing ${idx + 1}/${domains.size}: $dm",
+                            Toast.LENGTH_SHORT).show()
+                        if (CloudflareShield.bypassDomain(ctx, dm)) ok++
+                        kotlinx.coroutines.delay(200)
+                    }
+                    Toast.makeText(ctx,
+                        if (ok == domains.size) "✓ All protected"
+                        else "Protected $ok / ${domains.size}",
+                        Toast.LENGTH_SHORT).show()
+                    dlg.dismiss()
+                    showSettingsDialog(ctx, onSaved)
                 }
             }
-            c.body.addView(actionRow(
-                ctx, "Add custom domain", "Open any URL to solve CF",
-                "Add"
-            ) { openCfWebView(ctx, "https://www.febbox.com", "febbox.com") })
-            body.addView(c.root)
+            .setNegativeButton("Cancel", null)
+            .create()
+        d.setCancelable(false)
+        d.show()
+    })
+
+    // Clear all
+    c.body.addView(actionRow(
+        ctx,
+        "Clear all cookies",
+        "Removes every saved Cloudflare cookie",
+        "Clear", buttonColor = RED
+    ) {
+        AlertDialog.Builder(ctx)
+            .setTitle("Clear all CF cookies?")
+            .setMessage("You will need to bypass again next time.")
+            .setPositiveButton("Clear") { _, _ ->
+                for ((_, domains) in CloudflareShield.GROUPS) {
+                    for (dm in domains) CloudflareShield.clearCookieAndExpiry(dm)
+                }
+                Toast.makeText(ctx, "All cookies cleared", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                showSettingsDialog(ctx, onSaved)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    })
+
+    // saved domains list
+    val saved = getCfDomains()
+    if (saved.isNotEmpty()) {
+        c.body.addView(labelBlock(ctx, "Saved domains",
+            "Tap ↻ to refresh, ✕ to clear one"))
+        for (domain in saved) {
+            val has = getCookieForDomain(domain) != null
+            c.body.addView(domainRow(
+                ctx, domain, has,
+                onOpen = { openCfWebView(ctx, "https://$domain", domain) },
+                onClear = {
+                    CloudflareShield.clearCookieAndExpiry(domain)
+                    Toast.makeText(ctx, "Cleared $domain", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                    showSettingsDialog(ctx, onSaved)
+                }
+            ))
         }
+    }
+
+    // add custom domain
+    c.body.addView(actionRow(
+        ctx, "Add custom domain", "Open any URL to solve CF",
+        "Add"
+    ) { openCfWebView(ctx, "https://www.febbox.com", "febbox.com") })
+
+    body.addView(c.root)
+}
 
         // ── FEBBOX ACCOUNT ──
 run {
