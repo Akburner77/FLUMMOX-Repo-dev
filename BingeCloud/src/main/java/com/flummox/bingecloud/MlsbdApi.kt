@@ -3,12 +3,14 @@ package com.flummox.bingecloud
 import com.lagradost.cloudstream3.app
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
 // ═══════════════════════════════════════════════════════════════
 // ── MLSBD: Bangladeshi movie/series link directory ──
 // WordPress site. Search → movie page → savelinks.me redirect →
 // multicloudlinks page → player.php streamSrc / R2 direct.
+// All remote hops go through cloudflareGet (CF-protected).
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
@@ -27,11 +29,13 @@ data class MlsbdHit(val url: String, val title: String, val poster: String?)
 // ── search ──
 suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
     val url = "$MLSBD_BASE/?s=${URLEncoder.encode(query, "UTF-8")}"
-    val doc = try {
-        app.get(url, headers = mlsbdHeaders).document
+    val html = try {
+        cloudflareGet(url, referer = MLSBD_BASE)
     } catch (e: Exception) {
         BCLog.e("MLSBD search failed: ${e.message}"); return emptyList()
-    }
+    } ?: return emptyList()
+    val doc = Jsoup.parse(html, url)
+
     val out = mutableListOf<MlsbdHit>()
     for (card in doc.select("div.single-post")) {
         val a = card.selectFirst("div.thumb a[href]")
@@ -66,8 +70,13 @@ suspend fun mlsbdFindPage(
         val l = h.title.lowercase()
         if (type == "series") {
             if (l.contains("season") || l.contains("s0") || l.contains("series")) score += 2
-            if (season > 0 && pageHasSeason(h.title, season)) score += 2
-            else if (season > 0) { BCLog.d("MLSBD skip wrong season: ${h.title.take(60)}"); continue }
+            if (season > 0) {
+                if (pageHasSeason(h.title, season)) score += 2
+                else {
+                    BCLog.d("MLSBD skip wrong season: ${h.title.take(60)}")
+                    continue
+                }
+            }
         } else {
             if (!l.contains("season") && !l.contains("series")) score += 1
         }
@@ -78,19 +87,15 @@ suspend fun mlsbdFindPage(
     return picked.url
 }
 
-// ── resolve savelinks.me → multicloudlinks URL ──
+// ── resolve savelinks.me → multicloudlinks URL (CF-protected) ──
 private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
     return try {
-        val res = app.get(savelinksUrl, headers = mlsbdHeaders, allowRedirects = false)
-        val loc = res.headers["Location"]
-        if (!loc.isNullOrBlank() && loc.startsWith("http")) {
-            loc
-        } else {
-            // fallback: try to find redirect inside body
-            val body = res.text
-            Regex("""https?://[^"'\s]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
-                .find(body)?.value
-        }
+        val body = cloudflareGet(savelinksUrl, referer = MLSBD_BASE) ?: return null
+        Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
+            .find(body)?.value
+            ?: Regex("""(?:window\.location|location\.href)\s*=\s*["']([^"']+)["']""")
+                .find(body)?.groupValues?.get(1)
+                ?.takeIf { it.contains("multicloudlinks") }
     } catch (e: Exception) {
         BCLog.d("MLSBD savelinks resolve failed: ${e.message}"); null
     }
@@ -100,11 +105,13 @@ private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
 private suspend fun mlsbdExtractFromMulticloud(
     multiUrl: String, quality: String
 ): List<ScrapedMirror> {
-    val doc = try {
-        app.get(multiUrl, headers = mlsbdHeaders).document
+    val html = try {
+        cloudflareGet(multiUrl, referer = "https://savelinks.me/")
     } catch (e: Exception) {
         BCLog.d("MLSBD multicloud fetch failed: ${e.message}"); return emptyList()
-    }
+    } ?: return emptyList()
+    val doc = Jsoup.parse(html, multiUrl)
+
     val out = mutableListOf<ScrapedMirror>()
 
     // 1. player.php → fetch and extract streamSrc
@@ -127,7 +134,7 @@ private suspend fun mlsbdExtractFromMulticloud(
         BCLog.d("MLSBD R2 $quality → ${r2Url.take(80)}")
     }
 
-    // 3. FilePress mirror — via existing extractor in loadLinks
+    // 3. FilePress mirror — handled by existing resolver in loadLinks
     val fpUrl = doc.select("a.premium-btn[href]").firstOrNull {
         it.text().lowercase().contains("filepress")
     }?.attr("href")?.takeIf { it.startsWith("http") }
@@ -139,10 +146,11 @@ private suspend fun mlsbdExtractFromMulticloud(
     return out
 }
 
-// ── fetch player.php and extract streamSrc ──
+// ── fetch player.php and extract streamSrc (CF-protected) ──
 private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     return try {
-        val html = app.get(playerUrl, headers = mlsbdHeaders).text
+        val html = cloudflareGet(playerUrl, referer = "https://new2.multicloudlinks.com/")
+            ?: return null
         val m = Regex("""const\s+streamSrc\s*=\s*"([^"]+)"""")
             .find(html)
         val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
@@ -160,17 +168,14 @@ private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
 // ═══════════════════════════════════════════════════════════════
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: return emptyList()
-    val doc = try {
-        app.get(pageUrl, headers = mlsbdHeaders).document
-    } catch (e: Exception) {
-        BCLog.e("MLSBD page fetch failed: ${e.message}"); return emptyList()
-    }
+    val pageHtml = cloudflareGet(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
+    val doc = Jsoup.parse(pageHtml, pageUrl)
 
-    // walk sections
-    data class Section(val title: String, val links: List<org.jsoup.nodes.Element>)
+    // walk sections: header div + following <p> siblings until next header
+    data class Section(val title: String, val links: List<Element>)
     val sections = mutableListOf<Section>()
     for (secDiv in doc.select("div.post-section-title.download")) {
-        val links = mutableListOf<org.jsoup.nodes.Element>()
+        val links = mutableListOf<Element>()
         var sib = secDiv.nextElementSibling()
         while (sib != null && !sib.hasClass("post-section-title")) {
             if (sib.tagName() == "p") links.addAll(sib.select("a.Dbtn[href]"))
@@ -210,7 +215,7 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
                 text.contains("1080") -> "1080p"
                 text.contains("720") -> "720p"
                 text.contains("480") -> "480p"
-                else -> continue  // skip "Watch Online" — download links already give player
+                else -> continue
             }
             if (quality == "480p") continue
             jobs.add(Job(quality, href))
@@ -219,7 +224,6 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     BCLog.d("MLSBD savelinks jobs: ${jobs.size}")
 
     val out = mutableListOf<ScrapedMirror>()
-    // dedupe by (quality, URL of savelinks) — same 720p might appear as 720p and watch
     val seen = mutableSetOf<String>()
     for (j in jobs) {
         val key = "${j.quality}|${j.savelinks}"
@@ -229,11 +233,6 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         BCLog.d("MLSBD ${j.quality} → ${multiUrl.take(90)}")
         val mirrors = mlsbdExtractFromMulticloud(multiUrl, j.quality)
         out.addAll(mirrors)
-        // cap: 2 mirrors per quality
-        val count = out.count { it.quality == j.quality }
-        if (count >= 2) {
-            BCLog.d("MLSBD ${j.quality}: cap reached ($count)")
-        }
     }
 
     BCLog.d("MLSBD: ${out.size} total mirrors")
