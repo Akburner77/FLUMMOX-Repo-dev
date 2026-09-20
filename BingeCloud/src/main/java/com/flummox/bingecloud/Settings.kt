@@ -1,5 +1,6 @@
 package com.flummox.bingecloud
 
+import com.flummox.bingecore.CloudflareShield
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
