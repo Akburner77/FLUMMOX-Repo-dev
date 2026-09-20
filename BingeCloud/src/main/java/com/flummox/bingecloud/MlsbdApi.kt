@@ -204,16 +204,7 @@ private suspend fun mlsbdExtractFromMulticloud(
         out.add(ScrapedMirror(quality, "MLSBD R2", r2Url, "MLSBD"))
         BCLog.d("MLSBD R2 $quality → ${r2Url.take(80)}")
     }
-
-    // 3. FilePress mirror — handled by existing resolver in loadLinks
-    val fpUrl = doc.select("a.premium-btn[href]").firstOrNull {
-        it.text().lowercase().contains("filepress")
-    }?.attr("href")?.takeIf { it.startsWith("http") }
-    if (fpUrl != null && out.size < 3) {
-        out.add(ScrapedMirror(quality, "MLSBD FilePress", fpUrl, "MLSBD"))
-        BCLog.d("MLSBD FilePress $quality → ${fpUrl.take(80)}")
-    }
-
+    
     return out
 }
 
