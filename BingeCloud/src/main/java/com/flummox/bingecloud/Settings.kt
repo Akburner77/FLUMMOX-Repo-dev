@@ -1328,7 +1328,18 @@ private class NightCloudsView(context: Context) : View(context) {
                             return@setOnClickListener
                         }
                         inputDlg.dismiss()
-                        openCfWebView(ctx, "https://$raw", raw)
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+    try {
+        val html = cloudflareGet("https://$raw", referer = "https://$raw")
+        if (html != null) {
+            val cookie = CookieManager.getInstance().getCookie("https://$raw")
+            if (!cookie.isNullOrBlank()) {
+                saveCookieForDomain(raw, cookie)
+                Toast.makeText(ctx, "✓ Saved for $raw", Toast.LENGTH_SHORT).show()
+            }
+        }
+    } catch (_: Exception) {}
+}
                     }
                 })
                 wrap.addView(btnRow)
