@@ -1,16 +1,24 @@
 package com.flummox.bingecloud
 
-import com.lagradost.cloudstream3.app
+import okhttp3.Dns
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.InetAddress
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 // ═══════════════════════════════════════════════════════════════
 // ── MLSBD: Bangladeshi movie/series link directory ──
 // WordPress site. Search → movie page → savelinks.me redirect →
 // multicloudlinks page → player.php streamSrc / R2 direct.
-// All remote hops go through cloudflareGet (CF-protected).
+//
+// System DNS for mlsbd.co is poisoned in some regions (returns
+// an AWS origin IP that silently drops TCP). We bypass it with
+// Cloudflare DoH for the .co hostname; CF-protected hops still
+// use cloudflareGet.
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
@@ -18,22 +26,84 @@ private const val MLSBD_UA =
     "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
-private val mlsbdHeaders = mapOf(
-    "User-Agent" to MLSBD_UA,
-    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language" to "en-US,en;q=0.9"
-)
+// ── DoH resolver for mlsbd.co ──
+private val mlsbdDohDns: Dns = object : Dns {
+    private val bootstrap: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build()
+    }
+
+    override fun lookup(hostname: String): List<InetAddress> {
+        return try {
+            val req = Request.Builder()
+                .url("https://cloudflare-dns.com/dns-query?name=$hostname&type=A")
+                .header("Accept", "application/dns-json")
+                .build()
+            val resp = bootstrap.newCall(req).execute()
+            val body = resp.body?.string() ?: return Dns.SYSTEM.lookup(hostname)
+            val root = JSONObject(body)
+            val answers = root.optJSONArray("Answer") ?: return Dns.SYSTEM.lookup(hostname)
+            val out = mutableListOf<InetAddress>()
+            for (i in 0 until answers.length()) {
+                val a = answers.optJSONObject(i) ?: continue
+                if (a.optInt("type", 0) != 1) continue
+                val ip = a.optString("data").trim()
+                if (ip.isEmpty()) continue
+                try { out.add(InetAddress.getByName(ip)) } catch (_: Exception) {}
+            }
+            if (out.isEmpty()) {
+                BCLog.d("MLSBD DoH: no A for $hostname, using system")
+                Dns.SYSTEM.lookup(hostname)
+            } else {
+                BCLog.d("MLSBD DoH: $hostname → ${out.joinToString(",") { it.hostAddress ?: "?" }}")
+                out
+            }
+        } catch (e: Exception) {
+            BCLog.d("MLSBD DoH failed for $hostname: ${e.message}")
+            Dns.SYSTEM.lookup(hostname)
+        }
+    }
+}
+
+private val mlsbdHttp: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .dns(mlsbdDohDns)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+}
+
+// ── fetch mlsbd.co through the DoH-aware client ──
+private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
+    return try {
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", MLSBD_UA)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+            .build()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val resp = mlsbdHttp.newCall(req).execute()
+            if (resp.code !in 200..299) {
+                BCLog.d("MLSBD fetch $url → HTTP ${resp.code}")
+                null
+            } else resp.body?.string()
+        }
+    } catch (e: Exception) {
+        BCLog.e("MLSBD fetch failed for ${url.take(60)}: ${e.message}"); null
+    }
+}
 
 data class MlsbdHit(val url: String, val title: String, val poster: String?)
 
 // ── search ──
 suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
     val url = "$MLSBD_BASE/?s=${URLEncoder.encode(query, "UTF-8")}"
-    val html = try {
-        cloudflareGet(url, referer = MLSBD_BASE)
-    } catch (e: Exception) {
-        BCLog.e("MLSBD search failed: ${e.message}"); return emptyList()
-    } ?: return emptyList()
+    val html = mlsbdFetch(url, referer = MLSBD_BASE) ?: return emptyList()
     val doc = Jsoup.parse(html, url)
 
     val out = mutableListOf<MlsbdHit>()
@@ -168,10 +238,9 @@ private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
 // ═══════════════════════════════════════════════════════════════
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: return emptyList()
-    val pageHtml = cloudflareGet(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
+    val pageHtml = mlsbdFetch(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
     val doc = Jsoup.parse(pageHtml, pageUrl)
 
-    // walk sections: header div + following <p> siblings until next header
     data class Section(val title: String, val links: List<Element>)
     val sections = mutableListOf<Section>()
     for (secDiv in doc.select("div.post-section-title.download")) {
@@ -185,7 +254,6 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     }
     BCLog.d("MLSBD sections: ${sections.size} on page")
 
-    // for series: filter by episode range, take first matching section
     val relevant: List<Section> = if (q.type == "series" && q.episode > 0) {
         sections.filter { s ->
             val m = Regex("""Epi-(\d+)-(\d+)""", RegexOption.IGNORE_CASE)
@@ -202,7 +270,6 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         return emptyList()
     }
 
-    // build savelinks jobs (skip 480p to reduce clutter)
     data class Job(val quality: String, val savelinks: String)
     val jobs = mutableListOf<Job>()
     for (sec in relevant) {
