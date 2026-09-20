@@ -8,7 +8,6 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.webkit.CookieManager
@@ -30,20 +29,21 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-// ═══════════════════════════════════════════════════════════════
-// ── bingecore: Cloudflare Shield ──
-// Single WebView reused across all domains sequentially.
-// Dark mode forced. Cookie captured per domain. No parallel
-// because WebView is main-thread only.
-// ═══════════════════════════════════════════════════════════════
 object CloudflareShield {
 
-    // Domain groups per source. Only CF-protected domains belong here.
+    // Only domains that actually serve a CF challenge.
+    // savelinks.me is a plain 302 → not CF-protected, do not include.
     val GROUPS: Map<String, List<String>> = mapOf(
-        "MLSBD" to listOf("mlsbd.co", "savelinks.me")
+        "MLSBD" to listOf("mlsbd.co")
     )
 
     private const val K_CF_EXPIRY_PREFIX = "bingecloud_cf_expiry_"
+
+    // Desktop UA — CF's desktop challenge is faster than the mobile flow
+    // and matches the UA we use for HTTP fetches, so the cookie stays valid.
+    const val CF_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 
     // ── expiry ──
     fun getExpiry(domain: String): Long =
@@ -92,9 +92,7 @@ object CloudflareShield {
         )
     }
 
-    // ── bypass all domains in one reused window ──
-    // Runs sequentially. Each domain gets 30s to produce cf_clearance,
-    // then moves on. Returns count of successfully captured cookies.
+    // ── bypass all domains in one reused window, sequentially ──
     suspend fun bypassGroup(
         ctx: Context,
         sourceName: String,
@@ -107,7 +105,6 @@ object CloudflareShield {
         val dlg = Dialog(ctx)
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
 
-        // ── card ──
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -117,7 +114,6 @@ object CloudflareShield {
             }
         }
 
-        // ── top bar (progress + close) ──
         val topBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -152,7 +148,6 @@ object CloudflareShield {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
 
-        // ── WebView (single, reused) ──
         val webWrap = FrameLayout(ctx).apply {
             setBackgroundColor(Color.WHITE)
         }
@@ -163,15 +158,16 @@ object CloudflareShield {
             settings.databaseEnabled = true
             settings.loadWithOverviewMode = true
             settings.useWideViewPort = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            settings.userAgentString =
-                "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            // dark mode
+            settings.userAgentString = CF_UA
+            // Skip images — speed. CF challenge is CSS/JS only.
+            settings.loadsImagesAutomatically = false
+            settings.blockNetworkImage = true
             try {
                 @Suppress("DEPRECATION")
                 settings.forceDark = WebSettings.FORCE_DARK_ON
-            } catch (_: Throwable) { /* API < 29 */ }
+            } catch (_: Throwable) {}
             webViewClient = WebViewClient()
             webChromeClient = WebChromeClient()
             CookieManager.getInstance().setAcceptCookie(true)
@@ -200,27 +196,27 @@ object CloudflareShield {
             dlg.dismiss()
         }
 
-        // ── loop through domains, reuse window ──
         try {
             for ((idx, domain) in domains.withIndex()) {
                 if (userCancelled) break
                 onProgress(idx + 1, domains.size, domain)
                 progressLabel.text = "${idx + 1} / ${domains.size}"
                 domainLabel.text = domain
+                val t0 = System.currentTimeMillis()
                 BCLog.d("[CF Shield] opening $domain (${idx + 1}/${domains.size})")
 
                 val captured = solveOne(
-                    ctx, web, domain,
+                    web, domain,
                     isCancelled = { userCancelled || !dlg.isShowing }
                 )
+                val ms = System.currentTimeMillis() - t0
                 if (captured) {
                     ok++
-                    BCLog.d("[CF Shield] $domain captured")
+                    BCLog.d("[CF Shield] $domain captured in ${ms}ms")
                 } else {
-                    BCLog.d("[CF Shield] $domain failed/timeout")
+                    BCLog.d("[CF Shield] $domain failed/timeout after ${ms}ms")
                 }
-                // short gap between domains so previous challenge fully clears
-                if (idx < domains.lastIndex) delay(400)
+                if (idx < domains.lastIndex) delay(200)
             }
         } finally {
             try { web.stopLoading() } catch (_: Exception) {}
@@ -231,10 +227,7 @@ object CloudflareShield {
     }
 
     // ── solve one domain in the reused WebView ──
-    // Loads the URL, polls CookieManager for cf_clearance.
-    // Returns true on capture, false on timeout or cancel.
     private suspend fun solveOne(
-        ctx: Context,
         web: WebView,
         domain: String,
         isCancelled: () -> Boolean
@@ -242,7 +235,7 @@ object CloudflareShield {
         val url = "https://$domain"
         val handler = Handler(Looper.getMainLooper())
         val start = System.currentTimeMillis()
-        val maxMs = 30_000L
+        val maxMs = 15_000L   // was 30s; 15s is plenty if UA + viewport are right
 
         web.loadUrl(url)
 
@@ -265,10 +258,11 @@ object CloudflareShield {
                     if (cont.isActive) cont.resume(false)
                     return
                 }
-                handler.postDelayed(this, 500)
+                handler.postDelayed(this, 150L)   // was 500ms → 150ms
             }
         }
-        handler.postDelayed(poll, 500)
+        // Start immediately, don't wait 500ms for the first check
+        handler.post(poll)
 
         cont.invokeOnCancellation {
             handler.removeCallbacks(poll)
