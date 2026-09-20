@@ -5,9 +5,12 @@ import android.app.Dialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.webkit.CookieManager
@@ -29,23 +32,28 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
+// ═══════════════════════════════════════════════════════════════
+// ── bingecore: Cloudflare Shield ──
+// Off-screen Turnstile solver. Attaches WebView to current window,
+// translates off-screen, dispatches real Tab+Space key events to
+// press the checkbox. Polls CookieManager every 150ms for
+// cf_clearance. Dark mode. Images blocked for speed.
+// ═══════════════════════════════════════════════════════════════
 object CloudflareShield {
 
     // Only domains that actually serve a CF challenge.
-    // savelinks.me is a plain 302 → not CF-protected, do not include.
     val GROUPS: Map<String, List<String>> = mapOf(
         "MLSBD" to listOf("mlsbd.co")
     )
 
     private const val K_CF_EXPIRY_PREFIX = "bingecloud_cf_expiry_"
 
-    // Desktop UA — CF's desktop challenge is faster than the mobile flow
-    // and matches the UA we use for HTTP fetches, so the cookie stays valid.
+    // Desktop UA — matches the HTTP client's UA so the cookie
+    // stays valid across WebView and OkHttp.
     const val CF_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 
-    // ── expiry ──
     fun getExpiry(domain: String): Long =
         getKey<Long>(K_CF_EXPIRY_PREFIX + domain) ?: 0L
 
@@ -54,7 +62,6 @@ object CloudflareShield {
         setKey(K_CF_EXPIRY_PREFIX + domain, 0L)
     }
 
-    // ── group status ──
     enum class State { EMPTY, PARTIAL, PROTECTED, WORKING }
 
     data class GroupStatus(
@@ -92,7 +99,7 @@ object CloudflareShield {
         )
     }
 
-    // ── bypass all domains in one reused window, sequentially ──
+    // ── bypass all domains sequentially ──
     suspend fun bypassGroup(
         ctx: Context,
         sourceName: String,
@@ -114,6 +121,7 @@ object CloudflareShield {
             }
         }
 
+        // ── top bar ──
         val topBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -148,8 +156,10 @@ object CloudflareShield {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
 
+        // ── WebView wrapper (visible only if solve fails after 8s) ──
         val webWrap = FrameLayout(ctx).apply {
             setBackgroundColor(Color.WHITE)
+            visibility = View.GONE  // hidden during auto-solve
         }
         val web = WebView(ctx).apply {
             setBackgroundColor(Color.WHITE)
@@ -161,12 +171,13 @@ object CloudflareShield {
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             settings.userAgentString = CF_UA
-            // Skip images — speed. CF challenge is CSS/JS only.
             settings.loadsImagesAutomatically = false
             settings.blockNetworkImage = true
+            // Dark mode
             try {
-                @Suppress("DEPRECATION")
-                settings.forceDark = WebSettings.FORCE_DARK_ON
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    settings.forceDark = WebSettings.FORCE_DARK_ON
+                }
             } catch (_: Throwable) {}
             webViewClient = WebViewClient()
             webChromeClient = WebChromeClient()
@@ -206,7 +217,7 @@ object CloudflareShield {
                 BCLog.d("[CF Shield] opening $domain (${idx + 1}/${domains.size})")
 
                 val captured = solveOne(
-                    web, domain,
+                    ctx, web, webWrap, domain,
                     isCancelled = { userCancelled || !dlg.isShowing }
                 )
                 val ms = System.currentTimeMillis() - t0
@@ -226,16 +237,25 @@ object CloudflareShield {
         return@withContext ok
     }
 
-    // ── solve one domain in the reused WebView ──
+    // ── solve one domain ──
+    // Strategy: WebView starts hidden. Every 150ms:
+    //   1. Check for cf_clearance cookie → captured, done
+    //   2. After 4s, dispatch Tab + Space (presses the checkbox)
+    //   3. After 8s with no cookie, reveal the WebView so user can tap
+    //   4. After 20s, timeout
     private suspend fun solveOne(
+        ctx: Context,
         web: WebView,
+        webWrap: FrameLayout,
         domain: String,
         isCancelled: () -> Boolean
     ): Boolean = suspendCancellableCoroutine { cont ->
         val url = "https://$domain"
         val handler = Handler(Looper.getMainLooper())
         val start = System.currentTimeMillis()
-        val maxMs = 15_000L   // was 30s; 15s is plenty if UA + viewport are right
+        val maxMs = 20_000L
+        var revealed = false
+        var pressed = 0
 
         web.loadUrl(url)
 
@@ -251,21 +271,57 @@ object CloudflareShield {
                     val exp = System.currentTimeMillis() + 24L * 60 * 60 * 1000
                     Settings.saveCookieForDomain(domain, cookie)
                     setKey(K_CF_EXPIRY_PREFIX + domain, exp)
+                    BCLog.d("[CF Shield] $domain cookie captured")
                     if (cont.isActive) cont.resume(true)
                     return
                 }
-                if (System.currentTimeMillis() - start > maxMs) {
+
+                val elapsed = System.currentTimeMillis() - start
+
+                // after 4s, try pressing the checkbox via real key events
+                if (elapsed > 4_000 && pressed < 3 && (elapsed % 4_000 < 200)) {
+                    pressed++
+                    pressCheckbox(web)
+                    BCLog.d("[CF Shield] $domain press #$pressed")
+                }
+
+                // after 8s, reveal the WebView so user can manually tap
+                if (!revealed && elapsed > 8_000) {
+                    revealed = true
+                    webWrap.visibility = View.VISIBLE
+                    BCLog.d("[CF Shield] $domain revealed for manual solve")
+                }
+
+                if (elapsed > maxMs) {
                     if (cont.isActive) cont.resume(false)
                     return
                 }
-                handler.postDelayed(this, 150L)   // was 500ms → 150ms
+                handler.postDelayed(this, 150L)
             }
         }
-        // Start immediately, don't wait 500ms for the first check
         handler.post(poll)
 
         cont.invokeOnCancellation {
             handler.removeCallbacks(poll)
+        }
+    }
+
+    // ── dispatch Tab + Space to press the CF checkbox ──
+    // Real key events carry isTrusted=true, so Cloudflare
+    // treats them as user input, not a scripted click.
+    private fun pressCheckbox(web: WebView) {
+        try {
+            web.requestFocus()
+            val down1 = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB)
+            val up1 = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_TAB)
+            val down2 = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SPACE)
+            val up2 = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SPACE)
+            web.dispatchKeyEvent(down1)
+            web.dispatchKeyEvent(up1)
+            web.dispatchKeyEvent(down2)
+            web.dispatchKeyEvent(up2)
+        } catch (e: Exception) {
+            BCLog.d("[CF Shield] pressCheckbox failed: ${e.message}")
         }
     }
 
