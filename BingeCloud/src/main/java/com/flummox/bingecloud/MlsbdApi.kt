@@ -49,7 +49,8 @@ private val mlsbdHttpClient: OkHttpClient by lazy {
 
 // ── Helper to fetch through the custom DNS client ──
 private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
-    return try {
+    // ── try custom-DNS client first (bypasses ISP DNS poisoning) ──
+    try {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", MLSBD_UA)
@@ -58,15 +59,32 @@ private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
             .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
             .build()
 
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val response = mlsbdHttpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                BCLog.d("MLSBD fetch $url → HTTP ${response.code}")
-                null
-            } else response.body?.string()
+            Pair(response.code, response.body?.string())
+        }
+        val code = result.first
+        val body = result.second
+        if (code in 200..299 && !body.isNullOrBlank()) {
+            // sanity check — CF challenge page returned with 200
+            val lower = body.lowercase()
+            val looksLikeChallenge = lower.contains("just a moment") ||
+                lower.contains("cf-chl") || lower.contains("challenges.cloudflare.com")
+            if (!looksLikeChallenge) return body
+            BCLog.d("MLSBD: challenge detected in 200 body for ${url.take(60)}")
+        } else {
+            BCLog.d("MLSBD fetch $url → HTTP $code")
         }
     } catch (e: Exception) {
         BCLog.e("MLSBD fetch failed for ${url.take(60)}: ${e.message}")
+    }
+
+    // ── 403 / challenge → framework WebViewResolver ──
+    BCLog.d("MLSBD: falling through to cloudflareGet for ${url.take(60)}")
+    return try {
+        cloudflareGet(url, referer)
+    } catch (e: Exception) {
+        BCLog.e("MLSBD cloudflareGet failed: ${e.message}")
         null
     }
 }
