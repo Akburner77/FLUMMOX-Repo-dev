@@ -74,6 +74,7 @@ object Settings {
     const val K_SRC_MOVIEBOX = "bingecloud_src_moviebox"
     const val K_SRC_ANIKOTO = "bingecloud_src_anikoto"
     const val K_SRC_SHOWBOX = "bingecloud_src_showbox"
+    const val K_SRC_MLSBD = "bingecloud_src_mlsbd"
     const val K_QUALITY = "bingecloud_quality"
     const val K_PREFILTER = "bingecloud_prefilter"
     const val K_PREFETCH = "bingecloud_prefetch"
@@ -376,6 +377,7 @@ private val DEFAULT_ON_ROWS = setOf(
     fun isSrcMovieBox(): Boolean = getKey<Boolean>(K_SRC_MOVIEBOX) ?: true
     fun isSrcAnikoto(): Boolean = getKey<Boolean>(K_SRC_ANIKOTO) ?: true
     fun isSrcShowBox(): Boolean = getKey<Boolean>(K_SRC_SHOWBOX) ?: true
+    fun isSrcMlsbd(): Boolean = getKey<Boolean>(K_SRC_MLSBD) ?: true
     // ══════════════════════════════════════════════════════════
     // ── COLORS ──
     // ══════════════════════════════════════════════════════════
@@ -1224,6 +1226,7 @@ run {
             c.body.addView(toggleRow(ctx, "MovieBox", "Native API — no login", isSrcMovieBox()) { setKey(K_SRC_MOVIEBOX, it) })
             c.body.addView(toggleRow(ctx, "AniKoto", "Anime only — sub/dub", isSrcAnikoto()) { setKey(K_SRC_ANIKOTO, it) })
             c.body.addView(toggleRow(ctx, "ShowBox", "FebBox — movies & series", isSrcShowBox()) { setKey(K_SRC_SHOWBOX, it) })
+            c.body.addView(toggleRow(ctx, "MLSBD", "Bangla movies & series", isSrcMlsbd()) { setKey(K_SRC_MLSBD, it) })
             body.addView(c.root)
         }
 
