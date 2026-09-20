@@ -38,7 +38,7 @@ object CloudflareShield {
 
     // Domain groups per source. Add new sources here as we add them.
     val GROUPS: Map<String, List<String>> = mapOf(
-        "MLSBD" to listOf("mlsbd.co", "savelinks.me", "new2.multicloudlinks.com")
+        "MLSBD" to listOf("mlsbd.co", "savelinks.me")
     )
 
     private const val K_CF_EXPIRY_PREFIX = "bingecloud_cf_expiry_"
