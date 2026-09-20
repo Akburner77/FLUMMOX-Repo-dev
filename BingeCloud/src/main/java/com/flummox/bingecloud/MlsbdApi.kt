@@ -9,17 +9,17 @@ import java.net.URLEncoder
 // ── MLSBD: Bangladeshi movie/series link directory ──
 // WordPress site. Search → movie page → savelinks.me redirect →
 // multicloudlinks page → player.php streamSrc / R2 direct.
-// mlsbd.co and savelinks.me are CF-protected and go through
-// CloudflareShield's stored cookies.
+// Only mlsbd.co is CF-protected. savelinks.me is a plain 302.
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
 
+// Must match CloudflareShield.CF_UA — the CF cookie is validated
+// against the User-Agent that solved the challenge.
 private const val MLSBD_UA =
-    "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 
-// ── fetch with CF cookie attached ──
 private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
     val host = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
     val cookie = if (host.isNotBlank()) Settings.getCookieForDomain(host) else null
@@ -43,7 +43,6 @@ private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
 
 data class MlsbdHit(val url: String, val title: String, val poster: String?)
 
-// ── search ──
 suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
     val url = "$MLSBD_BASE/?s=${URLEncoder.encode(query, "UTF-8")}"
     val html = mlsbdFetch(url, referer = MLSBD_BASE) ?: return emptyList()
@@ -67,7 +66,6 @@ suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
     return out
 }
 
-// ── find best-matching movie/series page ──
 suspend fun mlsbdFindPage(
     title: String, year: String, type: String, season: Int
 ): String? {
@@ -100,7 +98,6 @@ suspend fun mlsbdFindPage(
     return picked.url
 }
 
-// ── resolve savelinks.me → multicloudlinks URL ──
 private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
     return try {
         val body = mlsbdFetch(savelinksUrl, referer = MLSBD_BASE) ?: return null
@@ -114,13 +111,14 @@ private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
     }
 }
 
-// ── extract mirrors from multicloudlinks page ──
-// Multicloudlinks is NOT CF-protected. Plain app.get is fine.
 private suspend fun mlsbdExtractFromMulticloud(
     multiUrl: String, quality: String
 ): List<ScrapedMirror> {
     val html = try {
-        app.get(multiUrl, headers = mapOf("User-Agent" to MLSBD_UA, "Referer" to "https://savelinks.me/")).text
+        app.get(multiUrl, headers = mapOf(
+            "User-Agent" to MLSBD_UA,
+            "Referer" to "https://savelinks.me/"
+        )).text
     } catch (e: Exception) {
         BCLog.d("MLSBD multicloud fetch failed: ${e.message}"); return emptyList()
     }
@@ -149,7 +147,6 @@ private suspend fun mlsbdExtractFromMulticloud(
     return out
 }
 
-// ── fetch player.php and extract streamSrc ──
 private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     return try {
         val html = app.get(playerUrl, headers = mapOf(
@@ -168,9 +165,6 @@ private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ── ENTRY POINT ──
-// ═══════════════════════════════════════════════════════════════
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: return emptyList()
     val pageHtml = mlsbdFetch(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
