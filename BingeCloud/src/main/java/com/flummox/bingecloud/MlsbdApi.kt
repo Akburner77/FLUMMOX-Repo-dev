@@ -239,15 +239,15 @@ private suspend fun mlsbdExtractFromMulticloud(
     }
 
     val r2Url = doc.select("a.premium-btn[href]").firstOrNull {
-        val t = it.text().lowercase()
-        t.contains("turbo download") || t.contains("(r2)")
-    }?.attr("href")?.takeIf { it.startsWith("http") }
-    if (r2Url != null) {
-        out.add(ScrapedMirror(quality, "MLSBD R2", r2Url, "MLSBD"))
-        BCLog.d("[MLSBD] r2 $quality → ${r2Url.take(80)}")
-    } else {
-        BCLog.d("[MLSBD] no turbo/r2 anchor")
-    }
+    val t = it.text().lowercase()
+    t.contains("turbo download") || t.contains("(r2)")
+}?.attr("href")?.takeIf { it.startsWith("http") }
+if (r2Url != null) {
+    out.add(ScrapedMirror(quality, "MLSBD R2", r2Url, "MLSBD"))
+    BCLog.d("[MLSBD] r2 $quality FULL: $r2Url")
+} else {
+    BCLog.d("[MLSBD] no turbo/r2 anchor")
+}
 
     return out
 }
@@ -263,12 +263,12 @@ private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     val m = Regex("""const\s+streamSrc\s*=\s*"([^"]+)"""").find(html)
     val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
     if (url == null) {
-        BCLog.d("[MLSBD] player: no streamSrc in ${playerUrl.take(60)}")
+       BCLog.d("[MLSBD] player: no streamSrc in ${playerUrl.take(60)}")
     } else {
-        BCLog.d("[MLSBD] player streamSrc: ${url.take(100)}")
+       BCLog.d("[MLSBD] player streamSrc FULL: $url")
     }
-    return url
-}
+     return url
+    }
 
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     BCLog.d("[MLSBD] extractRaw '${q.title}' (${q.year}) ${q.type} S${q.season}E${q.episode}")
@@ -317,24 +317,32 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     }
 
     data class Job(val quality: String, val savelinks: String)
-    val jobs = mutableListOf<Job>()
-    for (sec in relevant) {
-        for (a in sec.links) {
-            val href = a.attr("href")
-            if (!href.contains("savelinks.me/view")) continue
-            val text = a.text().lowercase()
-            val quality = when {
-                text.contains("4k") || text.contains("2160") -> "2160p"
-                text.contains("1080") -> "1080p"
-                text.contains("720") -> "720p"
-                text.contains("480") -> "480p"
-                else -> continue
-            }
-            if (quality == "480p") continue
-            jobs.add(Job(quality, href))
+val jobs = mutableListOf<Job>()
+for (sec in relevant) {
+    for (a in sec.links) {
+        val href = a.attr("href")
+        val text = a.text().trim()
+        BCLog.d("[MLSBD]   anchor text='${text.take(90)}' href='$href'")
+        if (!href.contains("savelinks.me/view")) {
+            BCLog.d("[MLSBD]   skipped: no savelinks.me/view in href")
+            continue
         }
+        val lower = text.lowercase()
+        val quality = when {
+            lower.contains("4k") || lower.contains("2160") -> "2160p"
+            lower.contains("1080") -> "1080p"
+            lower.contains("720") -> "720p"
+            lower.contains("480") -> "480p"
+            else -> {
+                BCLog.d("[MLSBD]   skipped: no quality token in text")
+                continue
+            }
+        }
+        if (quality == "480p") continue
+        jobs.add(Job(quality, href))
     }
-    BCLog.d("[MLSBD] savelinks jobs: ${jobs.size}")
+}
+BCLog.d("[MLSBD] savelinks jobs: ${jobs.size}")
 
     val out = mutableListOf<ScrapedMirror>()
     val seen = mutableSetOf<String>()
