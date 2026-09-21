@@ -30,11 +30,15 @@ kotlin {
 
 cloudstream {
     description = "TV Series, Movies, Anime"
-    authors = listOf("FlummoxGamer")
+    authors = listOf("sayFLUMMOX")
     status = 1
     tvTypes = listOf("Movies","TV Series","Anime")
     language = "en"
     iconUrl = "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/BingeCloud/icon.png"
+    // Baked into the .cs3 manifest so CloudStream sees the same version
+    // as patch_plugins.py writes into plugins.json. Without this, .cs3
+    // reports -1 and CloudStream prompts update on every launch.
+    version = (System.getenv("NEW_VERSION") ?: "1").toIntOrNull() ?: 1
 }
 
 dependencies {
