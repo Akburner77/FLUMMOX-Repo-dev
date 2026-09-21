@@ -291,9 +291,79 @@ try {
 return url
     }
 
+// ── bonghd.com x_data: URL-decode → ROT13 → base64 → URL ──
+private fun mlsbdDecodeBongHd(raw: String): String? {
+    return try {
+        val urlDecoded = java.net.URLDecoder.decode(raw, "UTF-8")
+        val rot13 = buildString(urlDecoded.length) {
+            for (c in urlDecoded) {
+                when {
+                    c in 'a'..'z' -> append(((c - 'a' + 13) % 26 + 'a'.code).toChar())
+                    c in 'A'..'Z' -> append(((c - 'A' + 13) % 26 + 'A'.code).toChar())
+                    else -> append(c)
+                }
+            }
+        }
+        val bytes = android.util.Base64.decode(rot13, android.util.Base64.DEFAULT)
+        String(bytes, Charsets.UTF_8).trim().takeIf { it.startsWith("http") }
+    } catch (e: Exception) {
+        BCLog.e("[MLSBD] bonghd decode: ${e.message}")
+        null
+    }
+}
+
+// ── resolve any wrapper → mirrors (recursive, depth-capped) ──
+private suspend fun mlsbdResolveToMirrors(
+    url: String, quality: String, depth: Int = 0
+): List<ScrapedMirror> {
+    if (depth > 4) return emptyList()
+    val lower = url.lowercase()
+
+    if (lower.contains("multidownload.") ||
+        lower.endsWith(".mp4") || lower.endsWith(".mkv") ||
+        lower.endsWith(".m3u8") || lower.contains(".m3u8?") ||
+        lower.endsWith(".mpd")) {
+        BCLog.d("[MLSBD] direct $quality: ${url.take(120)}")
+        return listOf(ScrapedMirror(quality, "MLSBD Direct", url, "MLSBD"))
+    }
+
+    if (url.contains("player.php")) {
+        val s = mlsbdExtractPlayerStream(url) ?: return emptyList()
+        BCLog.d("[MLSBD] player $quality: ${s.take(120)}")
+        return listOf(ScrapedMirror(quality, "MLSBD Player", s, "MLSBD"))
+    }
+
+    if (url.contains("multicloudlinks.com/view/")) {
+        return mlsbdExtractFromMulticloud(url, quality)
+    }
+
+    if (url.contains("savelinks.me/view")) {
+        val m = mlsbdResolveSavelinks(url) ?: return emptyList()
+        return mlsbdResolveToMirrors(m, quality, depth + 1)
+    }
+
+    BCLog.d("[MLSBD] wrapper $quality: ${url.take(140)}")
+    val res = mlsbdFetchVia(url, referer = MLSBD_BASE, followRedirects = false)
+    val (code, body, loc) = res ?: return emptyList()
+    BCLog.d("[MLSBD] wrapper code=$code loc=${loc?.take(140)} bodyLen=${body?.length ?: 0}")
+
+    if (!loc.isNullOrBlank()) return mlsbdResolveToMirrors(loc, quality, depth + 1)
+    if (!body.isNullOrBlank()) {
+        Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""").find(body)?.value?.let {
+            return mlsbdResolveToMirrors(it, quality, depth + 1)
+        }
+        Regex("""https?://[^"'\s<>]*savelinks\.me/view/[A-Za-z0-9]+""").find(body)?.value?.let {
+            return mlsbdResolveToMirrors(it, quality, depth + 1)
+        }
+        Regex("""https?://[^"'\s<>]*player\.php[^"'\s<>]*""").find(body)?.value?.let {
+            return mlsbdResolveToMirrors(it, quality, depth + 1)
+        }
+    }
+    return emptyList()
+}
+
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
     BCLog.d("[MLSBD] extractRaw '${q.title}' (${q.year}) ${q.type} S${q.season}E${q.episode}")
-
     val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: run {
         BCLog.d("[MLSBD] no page matched — aborting")
         return emptyList()
@@ -337,46 +407,48 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         return emptyList()
     }
 
-    data class Job(val quality: String, val savelinks: String)
-val jobs = mutableListOf<Job>()
-for (sec in relevant) {
-    for (a in sec.links) {
-        val href = a.attr("href")
-        val text = a.text().trim()
-        BCLog.d("[MLSBD]   anchor text='${text.take(90)}' href='$href'")
-        if (!href.contains("savelinks.me/view")) {
-            BCLog.d("[MLSBD]   skipped: no savelinks.me/view in href")
-            continue
-        }
-        val lower = text.lowercase()
-        val quality = when {
-            lower.contains("4k") || lower.contains("2160") -> "2160p"
-            lower.contains("1080") -> "1080p"
-            lower.contains("720") -> "720p"
-            lower.contains("480") -> "480p"
-            else -> {
-                BCLog.d("[MLSBD]   skipped: no quality token in text")
-                continue
+        data class Job(val quality: String, val url: String)
+    val jobs = mutableListOf<Job>()
+    for (sec in relevant) {
+        for (a in sec.links) {
+            val href = a.attr("href")
+            val text = a.text().trim()
+            val lower = text.lowercase()
+            val quality = when {
+                lower.contains("4k") || lower.contains("2160") -> "2160p"
+                lower.contains("1080") -> "1080p"
+                lower.contains("720") -> "720p"
+                lower.contains("480") -> "480p"
+                else -> continue
             }
+            if (quality == "480p") continue
+            BCLog.d("[MLSBD]   anchor q=$quality text='${text.take(60)}' href='${href.take(140)}'")
+
+            var resolved: String? = null
+
+            val xData = Regex("""[?&]x_data=([^&]+)""").find(href)?.groupValues?.get(1)
+            if (xData != null) {
+                resolved = mlsbdDecodeBongHd(xData)
+                if (resolved != null) BCLog.d("[MLSBD]   bonghd decoded → ${resolved.take(140)}")
+                else BCLog.d("[MLSBD]   bonghd decode returned null")
+            }
+
+            if (resolved == null && href.startsWith("http")) {
+                resolved = href
+                BCLog.d("[MLSBD]   passing raw href to resolver")
+            }
+
+            if (resolved != null) jobs.add(Job(quality, resolved))
         }
-        if (quality == "480p") continue
-        jobs.add(Job(quality, href))
     }
-}
-BCLog.d("[MLSBD] savelinks jobs: ${jobs.size}")
+    BCLog.d("[MLSBD] jobs: ${jobs.size}")
 
     val out = mutableListOf<ScrapedMirror>()
     val seen = mutableSetOf<String>()
     for (j in jobs) {
-        val key = "${j.quality}|${j.savelinks}"
+        val key = "${j.quality}|${j.url}"
         if (!seen.add(key)) continue
-        val multiUrl = mlsbdResolveSavelinks(j.savelinks)
-        if (multiUrl.isNullOrBlank()) {
-            BCLog.d("[MLSBD] ${j.quality} resolve failed")
-            continue
-        }
-        BCLog.d("[MLSBD] ${j.quality} → ${multiUrl.take(90)}")
-        out.addAll(mlsbdExtractFromMulticloud(multiUrl, j.quality))
+        out.addAll(mlsbdResolveToMirrors(j.url, j.quality))
     }
 
     BCLog.d("[MLSBD] total mirrors: ${out.size}")
