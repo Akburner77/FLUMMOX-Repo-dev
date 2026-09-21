@@ -1,5 +1,22 @@
 package com.flummox.bingecloud
 
+// ═══════════════════════════════════════════════════════════════
+// ── MLSBD DNS resolver (DISABLED — utility, no active callers) ──
+//
+// Custom okhttp3.Dns that detects known-poisoned system DNS
+// responses for mlsbd.co and falls back to Google DoH, then to
+// hardcoded Cloudflare edges. Currently unreferenced.
+//
+// To reuse for a different host:
+//   1. Replace UNREACHABLE_1 / UNREACHABLE_2 with the poisoned IPs
+//      observed on your network (test: nslookup <host> vs a DoH
+//      resolver).
+//   2. Replace VERIFIED_EDGES with real Cloudflare anycast
+//      addresses for that host.
+//   3. Change `hostname.contains("mlsbd.co")` to match the new host.
+//   4. Attach via OkHttpClient.Builder().dns(MlsbdDns).
+// ═══════════════════════════════════════════════════════════════
+
 import okhttp3.Dns
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
