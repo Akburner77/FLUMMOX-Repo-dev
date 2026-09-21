@@ -15,9 +15,11 @@ import java.util.concurrent.TimeUnit
 
 private const val MLSBD_BASE = "https://mlsbd.co"
 
+// Must match CfSolverDialog.CF_UA and CloudflareHelper.CF_UA exactly —
+// cf_clearance is bound to the UA that solved it.
 private const val MLSBD_UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
 private val mlsbdHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
