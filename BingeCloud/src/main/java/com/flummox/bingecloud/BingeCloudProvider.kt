@@ -419,17 +419,24 @@ val raw: List<AioMeta> = if (isStreaming) {
                                          m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
                                          m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
                                          else -> ExtractorLinkType.VIDEO
-                                     }
-                                     val display = "$emoji${m.quality} •${m.mirror}"
-                                     BCLog.d("MLSBD link: $display")
-                                     callback.invoke(
-                                         newExtractorLink("MLSBD", display, m.url, linkType) {
-                                             this.referer = "https://new.multicloudlinks.com/"
-                                         }
-                                     )
-                                     emittedCount.incrementAndGet()
-                                     HostHealth.recordSuccess(host)
                                     }
+                                    val display = "$emoji${m.quality} •${m.mirror}"
+                                    val ua = "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
+                                        "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                                    BCLog.d("MLSBD link: $display")
+                                    BCLog.d("MLSBD url: ${m.url}")
+                                    callback.invoke(
+                                        newExtractorLink("MLSBD", display, m.url, linkType) {
+                                            this.referer = "https://new.multicloudlinks.com/"
+                                            this.headers = mapOf(
+                                                "User-Agent" to ua,
+                                                "Referer" to "https://new.multicloudlinks.com/"
+                                            )
+                                        }
+                                   )
+                                   emittedCount.incrementAndGet()
+                                   HostHealth.recordSuccess(host)
+                                   }
                                     else -> {
                                     val finalUrl = resolveWrapper(m.url)
                                     if (finalUrl == null) {
