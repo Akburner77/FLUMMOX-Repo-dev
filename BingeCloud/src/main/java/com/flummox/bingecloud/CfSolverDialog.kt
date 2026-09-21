@@ -38,6 +38,7 @@ object CfSolverDialog {
     private const val TOTAL_TIMEOUT_MS = 120_000L
     private const val SILENT_GRACE_MS = 8_000L
 
+    // Must match MlsbdApi.MLSBD_UA and CloudflareHelper.CF_UA exactly.
     private const val CF_UA =
         "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
