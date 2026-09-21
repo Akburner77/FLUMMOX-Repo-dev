@@ -1,9 +1,11 @@
 package com.flummox.bingecloud
 
+import android.app.Activity
 import android.content.Context
 import android.webkit.CookieManager
 import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.network.WebViewResolver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.net.URI
@@ -28,9 +30,35 @@ private val CF_INDICATORS = listOf(
     "challenges.cloudflare.com"
 )
 
-private fun isChallenge(html: String): Boolean {
+internal fun isCfChallenge(html: String): Boolean {
     val lower = html.lowercase()
     return CF_INDICATORS.any { lower.contains(it) }
+}
+
+// ── locate current foreground activity ──
+internal fun currentActivity(): Activity? {
+    // Option 1: CommonActivity.INSTANCE (Kotlin object) or .getActivity()
+    try {
+        val cls = Class.forName("com.lagradost.cloudstream3.CommonActivity")
+        val instanceField = cls.getDeclaredField("INSTANCE").apply { isAccessible = true }
+        val instance = instanceField.get(null)
+        if (instance is Activity) return instance
+        try {
+            val m = cls.getMethod("getActivity")
+            val a = m.invoke(instance)
+            if (a is Activity) return a
+        } catch (_: Throwable) {}
+    } catch (_: Throwable) {}
+
+    // Option 2: unwrap BingeCloudCtx.context through ContextWrapper chain
+    var ctx: Context? = BingeCloudCtx.context
+    var depth = 0
+    while (ctx != null && depth < 12) {
+        if (ctx is Activity) return ctx
+        ctx = (ctx as? android.content.ContextWrapper)?.baseContext
+        depth++
+    }
+    return null
 }
 
 // ── main CF-aware GET ──
@@ -46,7 +74,7 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
                 url, referer = referer,
                 headers = mapOf("User-Agent" to CF_UA, "Cookie" to storedCookie)
             )
-            if (res.code in 200..299 && !isChallenge(res.text)) {
+            if (res.code in 200..299 && !isCfChallenge(res.text)) {
                 BCLog.d("[CF] stored cookie worked for $domain (${System.currentTimeMillis() - startMs}ms)")
                 return res.text
             }
@@ -56,7 +84,7 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
     // ── 2. plain GET ──
     try {
         val res = app.get(url, referer = referer, headers = mapOf("User-Agent" to CF_UA))
-        if (res.code in 200..299 && !isChallenge(res.text)) {
+        if (res.code in 200..299 && !isCfChallenge(res.text)) {
             BCLog.d("[CF] plain GET ok for $domain (${System.currentTimeMillis() - startMs}ms)")
             return res.text
         }
@@ -65,34 +93,29 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
         BCLog.d("[CF] plain GET threw for $domain: ${e.message}")
     }
 
-    // ── 3. WebViewResolver interceptor ──
+    // ── 3. interactive solver ──
     return try {
-        val interceptor = WebViewResolver(
-            interceptUrl = Regex(".*"),
-            additionalUrls = emptyList(),
-            userAgent = CF_UA,
-            timeout = 30_000L
-        )
-        val res = app.get(
-            url,
-            referer = referer,
-            headers = mapOf("User-Agent" to CF_UA),
-            interceptor = interceptor
-        )
-        val cookieNow = CookieManager.getInstance().getCookie(url)
-        BCLog.d("[CF] post-interceptor cookie len=${cookieNow?.length ?: 0}")
-        if (res.code in 200..299 && !isChallenge(res.text)) {
-            if (!cookieNow.isNullOrBlank() && domain.isNotEmpty()) {
-                Settings.saveCookieForDomain(domain, cookieNow)
+        val activity = currentActivity()
+        if (activity == null) {
+            BCLog.d("[CF] no activity for solver ($domain)")
+            return null
+        }
+        BCLog.d("[CF] invoking solver for $domain")
+        val result = withContext(Dispatchers.Main) {
+            CfSolverDialog.resolve(activity, url)
+        }
+        if (result != null && result.html.isNotBlank()) {
+            if (result.cookie.isNotBlank() && domain.isNotEmpty()) {
+                Settings.saveCookieForDomain(domain, result.cookie)
             }
-            BCLog.d("[CF] post-interceptor ok for $domain")
-            res.text
+            BCLog.d("[CF] solver ok for $domain (${System.currentTimeMillis() - startMs}ms)")
+            result.html
         } else {
-            BCLog.d("[CF] post-interceptor GET ${res.code} for $domain")
+            BCLog.d("[CF] solver returned null for $domain")
             null
         }
     } catch (e: Exception) {
-        BCLog.e("[CF] interceptor failed for $domain: ${e.message}")
+        BCLog.e("[CF] solver failed for $domain: ${e.message}")
         null
     }
 }
