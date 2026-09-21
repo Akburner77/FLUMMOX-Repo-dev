@@ -11,6 +11,8 @@ import java.util.concurrent.TimeUnit
 // ── MLSBD: Bangladeshi movie/series link directory ──
 // All mlsbd.co requests go through a dedicated OkHttp client
 // that uses MlsbdDns to avoid unreachable system addresses.
+// Downstream redirect hosts (savelinks, multicloudlinks) fall
+// back to cloudflareGet when raw HTTP fails.
 // ═══════════════════════════════════════════════════════════════
 
 private const val MLSBD_BASE = "https://mlsbd.co"
@@ -30,6 +32,13 @@ private val mlsbdHttpClient: OkHttpClient by lazy {
         .build()
 }
 
+private fun looksLikeChallenge(body: String): Boolean {
+    val lower = body.lowercase()
+    return lower.contains("just a moment") ||
+        lower.contains("cf-chl") ||
+        lower.contains("challenges.cloudflare.com")
+}
+
 private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
     try {
         val request = Request.Builder()
@@ -47,23 +56,66 @@ private suspend fun mlsbdFetch(url: String, referer: String? = null): String? {
         val code = result.first
         val body = result.second
         if (code in 200..299 && !body.isNullOrBlank()) {
-            val lower = body.lowercase()
-            val challenge = lower.contains("just a moment") ||
-                lower.contains("cf-chl") || lower.contains("challenges.cloudflare.com")
-            if (!challenge) return body
-            BCLog.d("MLSBD: challenge in 200 body for ${url.take(60)}")
+            if (!looksLikeChallenge(body)) {
+                BCLog.d("[MLSBD] fetch ok ${url.take(80)} (${body.length} chars)")
+                return body
+            }
+            BCLog.d("[MLSBD] challenge in 200 body for ${url.take(60)}")
         } else {
-            BCLog.d("MLSBD fetch $url → HTTP $code")
+            BCLog.d("[MLSBD] fetch $url → HTTP $code")
         }
     } catch (e: Exception) {
-        BCLog.e("MLSBD fetch failed for ${url.take(60)}: ${e.message}")
+        BCLog.e("[MLSBD] fetch failed for ${url.take(60)}: ${e.message}")
     }
 
-    BCLog.d("MLSBD: falling through to cloudflareGet for ${url.take(60)}")
+    BCLog.d("[MLSBD] falling through to cloudflareGet for ${url.take(60)}")
     return try {
         cloudflareGet(url, referer)
     } catch (e: Exception) {
-        BCLog.e("MLSBD cloudflareGet failed: ${e.message}")
+        BCLog.e("[MLSBD] cloudflareGet failed: ${e.message}")
+        null
+    }
+}
+
+// ── fetch that prefers the raw client but falls back to the CF solver ──
+// Used for savelinks / multicloudlinks which may or may not be protected.
+private suspend fun mlsbdFetchVia(
+    url: String,
+    referer: String? = null,
+    followRedirects: Boolean = false
+): Triple<Int, String?, String?>? {
+    // returns (code, body, Location header) — Location may be null
+    return try {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", MLSBD_UA)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+            .build()
+
+        val client = if (followRedirects) mlsbdHttpClient
+            else mlsbdHttpClient.newBuilder().followRedirects(false).build()
+
+        val resp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.newCall(request).execute()
+        }
+        val body = try { resp.body?.string() } catch (_: Exception) { null }
+        val loc = resp.header("Location")
+
+        // If we got a challenge page or a 4xx that smells like CF, use solver
+        val needSolver = (resp.code == 403 || resp.code == 503) ||
+            (body != null && looksLikeChallenge(body))
+        if (needSolver) {
+            BCLog.d("[MLSBD] ${url.take(80)} → HTTP ${resp.code}, invoking solver")
+            val solved = cloudflareGet(url, referer)
+            if (solved != null) {
+                return Triple(200, solved, loc)
+            }
+        }
+        Triple(resp.code, body, loc)
+    } catch (e: Exception) {
+        BCLog.e("[MLSBD] fetchVia failed for ${url.take(60)}: ${e.message}")
         null
     }
 }
@@ -89,7 +141,7 @@ suspend fun mlsbdSearch(query: String): List<MlsbdHit> {
             ?.takeIf { it.startsWith("http") }
         out.add(MlsbdHit(href, title, poster))
     }
-    BCLog.d("MLSBD search '$query' → ${out.size}")
+    BCLog.d("[MLSBD] search '$query' → ${out.size}")
     return out
 }
 
@@ -97,12 +149,19 @@ suspend fun mlsbdFindPage(
     title: String, year: String, type: String, season: Int
 ): String? {
     val hits = mlsbdSearch(title)
-    if (hits.isEmpty()) return null
+    if (hits.isEmpty()) {
+        BCLog.d("[MLSBD] findPage: no search hits")
+        return null
+    }
 
     var best: MlsbdHit? = null
     var bestScore = 0
     for (h in hits) {
-        if (!titleMatches(title, h.title)) continue
+        val tm = titleMatches(title, h.title)
+        if (!tm) {
+            BCLog.d("[MLSBD] candidate rejected (title): ${h.title.take(80)}")
+            continue
+        }
         var score = 1
         if (year.isNotBlank() && h.title.contains(year)) score += 2
         val l = h.title.lowercase()
@@ -111,68 +170,72 @@ suspend fun mlsbdFindPage(
             if (season > 0) {
                 if (pageHasSeason(h.title, season)) score += 2
                 else {
-                    BCLog.d("MLSBD skip wrong season: ${h.title.take(60)}")
+                    BCLog.d("[MLSBD] candidate rejected (season): ${h.title.take(80)}")
                     continue
                 }
             }
         } else {
             if (!l.contains("season") && !l.contains("series")) score += 1
         }
+        BCLog.d("[MLSBD] candidate score=$score: ${h.title.take(80)}")
         if (score > bestScore) { bestScore = score; best = h }
     }
-    val picked = best ?: return null
-    BCLog.d("MLSBD matched '${picked.title.take(80)}' (score=$bestScore)")
+    val picked = best ?: run {
+        BCLog.d("[MLSBD] findPage: no candidate passed filters")
+        return null
+    }
+    BCLog.d("[MLSBD] matched '${picked.title.take(80)}' (score=$bestScore)")
     return picked.url
 }
 
 private suspend fun mlsbdResolveSavelinks(savelinksUrl: String): String? {
-    return try {
-        val res = mlsbdHttpClient.newCall(
-            Request.Builder()
-                .url(savelinksUrl)
-                .header("User-Agent", MLSBD_UA)
-                .build()
-        ).execute()
-        val loc = res.header("Location")
-        if (!loc.isNullOrBlank() && loc.contains("multicloudlinks")) {
-            loc
-        } else {
-            val body = res.body?.string() ?: ""
-            Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
-                .find(body)?.value
-        }
-    } catch (e: Exception) {
-        BCLog.d("MLSBD savelinks resolve failed: ${e.message}")
-        null
+    val res = mlsbdFetchVia(savelinksUrl, referer = MLSBD_BASE, followRedirects = false)
+    if (res == null) {
+        BCLog.d("[MLSBD] savelinks: fetch null for ${savelinksUrl.take(80)}")
+        return null
     }
+    val (code, body, loc) = res
+    BCLog.d("[MLSBD] savelinks resp code=$code loc=${loc?.take(100)} body=${body?.length ?: 0}")
+
+    if (!loc.isNullOrBlank() && loc.contains("multicloudlinks")) return loc
+    if (body.isNullOrBlank()) return null
+
+    val regex = Regex("""https?://[^"'\s<>]*multicloudlinks\.com/view/[A-Za-z0-9]+""")
+    val found = regex.find(body)?.value
+    if (found == null) {
+        BCLog.d("[MLSBD] savelinks: no multicloud URL in body")
+    } else {
+        BCLog.d("[MLSBD] savelinks: extracted ${found.take(100)}")
+    }
+    return found
 }
 
 private suspend fun mlsbdExtractFromMulticloud(
     multiUrl: String, quality: String
 ): List<ScrapedMirror> {
-    val html = try {
-        mlsbdHttpClient.newCall(
-            Request.Builder()
-                .url(multiUrl)
-                .header("User-Agent", MLSBD_UA)
-                .header("Referer", "https://savelinks.me/")
-                .build()
-        ).execute().body?.string() ?: return emptyList()
-    } catch (e: Exception) {
-        BCLog.d("MLSBD multicloud fetch failed: ${e.message}")
+    val res = mlsbdFetchVia(multiUrl, referer = "https://savelinks.me/", followRedirects = true)
+    val html = res?.second
+    if (html.isNullOrBlank()) {
+        BCLog.d("[MLSBD] multicloud: empty body for ${multiUrl.take(80)}")
         return emptyList()
     }
+    BCLog.d("[MLSBD] multicloud html ${html.length} chars")
     val doc = Jsoup.parse(html, multiUrl)
 
     val out = mutableListOf<ScrapedMirror>()
 
     val playerUrl = doc.selectFirst("a.premium-btn[href*='player.php']")?.attr("href")
     if (!playerUrl.isNullOrBlank()) {
+        BCLog.d("[MLSBD] player.php found: ${playerUrl.take(80)}")
         val stream = mlsbdExtractPlayerStream(playerUrl)
         if (stream != null) {
             out.add(ScrapedMirror(quality, "MLSBD Player", stream, "MLSBD"))
-            BCLog.d("MLSBD player stream $quality → ${stream.take(80)}")
+            BCLog.d("[MLSBD] player stream $quality → ${stream.take(80)}")
+        } else {
+            BCLog.d("[MLSBD] player stream null for $quality")
         }
+    } else {
+        BCLog.d("[MLSBD] no player.php anchor")
     }
 
     val r2Url = doc.select("a.premium-btn[href]").firstOrNull {
@@ -181,38 +244,46 @@ private suspend fun mlsbdExtractFromMulticloud(
     }?.attr("href")?.takeIf { it.startsWith("http") }
     if (r2Url != null) {
         out.add(ScrapedMirror(quality, "MLSBD R2", r2Url, "MLSBD"))
-        BCLog.d("MLSBD R2 $quality → ${r2Url.take(80)}")
+        BCLog.d("[MLSBD] r2 $quality → ${r2Url.take(80)}")
+    } else {
+        BCLog.d("[MLSBD] no turbo/r2 anchor")
     }
 
     return out
 }
 
 private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
-    return try {
-        val html = mlsbdHttpClient.newCall(
-            Request.Builder()
-                .url(playerUrl)
-                .header("User-Agent", MLSBD_UA)
-                .header("Referer", "https://new2.multicloudlinks.com/")
-                .build()
-        ).execute().body?.string() ?: return null
-
-        val m = Regex("""const\s+streamSrc\s*=\s*"([^"]+)"""")
-            .find(html)
-        val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
-        if (url == null) {
-            BCLog.d("MLSBD player: no streamSrc in ${playerUrl.take(60)}")
-        }
-        url
-    } catch (e: Exception) {
-        BCLog.d("MLSBD player fetch failed: ${e.message}")
-        null
+    val res = mlsbdFetchVia(playerUrl, referer = "https://new2.multicloudlinks.com/", followRedirects = true)
+    val html = res?.second
+    if (html.isNullOrBlank()) {
+        BCLog.d("[MLSBD] player: empty body")
+        return null
     }
+    BCLog.d("[MLSBD] player html ${html.length} chars")
+    val m = Regex("""const\s+streamSrc\s*=\s*"([^"]+)"""").find(html)
+    val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
+    if (url == null) {
+        BCLog.d("[MLSBD] player: no streamSrc in ${playerUrl.take(60)}")
+    } else {
+        BCLog.d("[MLSBD] player streamSrc: ${url.take(100)}")
+    }
+    return url
 }
 
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
-    val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: return emptyList()
-    val pageHtml = mlsbdFetch(pageUrl, referer = MLSBD_BASE) ?: return emptyList()
+    BCLog.d("[MLSBD] extractRaw '${q.title}' (${q.year}) ${q.type} S${q.season}E${q.episode}")
+
+    val pageUrl = mlsbdFindPage(q.title, q.year, q.type, q.season) ?: run {
+        BCLog.d("[MLSBD] no page matched — aborting")
+        return emptyList()
+    }
+    BCLog.d("[MLSBD] page → ${pageUrl.take(100)}")
+
+    val pageHtml = mlsbdFetch(pageUrl, referer = MLSBD_BASE) ?: run {
+        BCLog.d("[MLSBD] page fetch null — aborting")
+        return emptyList()
+    }
+    BCLog.d("[MLSBD] page html ${pageHtml.length} chars")
     val doc = Jsoup.parse(pageHtml, pageUrl)
 
     data class Section(val title: String, val links: List<Element>)
@@ -226,7 +297,8 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         }
         sections.add(Section(secDiv.text(), links))
     }
-    BCLog.d("MLSBD sections: ${sections.size} on page")
+    BCLog.d("[MLSBD] sections: ${sections.size} on page")
+    for (s in sections) BCLog.d("[MLSBD]   section '${s.title.take(60)}' links=${s.links.size}")
 
     val relevant: List<Section> = if (q.type == "series" && q.episode > 0) {
         sections.filter { s ->
@@ -240,7 +312,7 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
         sections
     }
     if (relevant.isEmpty()) {
-        BCLog.d("MLSBD: no matching section for ${q.type} E${q.episode}")
+        BCLog.d("[MLSBD] no matching section for ${q.type} E${q.episode}")
         return emptyList()
     }
 
@@ -262,18 +334,22 @@ suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
             jobs.add(Job(quality, href))
         }
     }
-    BCLog.d("MLSBD savelinks jobs: ${jobs.size}")
+    BCLog.d("[MLSBD] savelinks jobs: ${jobs.size}")
 
     val out = mutableListOf<ScrapedMirror>()
     val seen = mutableSetOf<String>()
     for (j in jobs) {
         val key = "${j.quality}|${j.savelinks}"
         if (!seen.add(key)) continue
-        val multiUrl = mlsbdResolveSavelinks(j.savelinks) ?: continue
-        BCLog.d("MLSBD ${j.quality} → ${multiUrl.take(90)}")
+        val multiUrl = mlsbdResolveSavelinks(j.savelinks)
+        if (multiUrl.isNullOrBlank()) {
+            BCLog.d("[MLSBD] ${j.quality} resolve failed")
+            continue
+        }
+        BCLog.d("[MLSBD] ${j.quality} → ${multiUrl.take(90)}")
         out.addAll(mlsbdExtractFromMulticloud(multiUrl, j.quality))
     }
 
-    BCLog.d("MLSBD: ${out.size} total mirrors")
+    BCLog.d("[MLSBD] total mirrors: ${out.size}")
     return out
 }
