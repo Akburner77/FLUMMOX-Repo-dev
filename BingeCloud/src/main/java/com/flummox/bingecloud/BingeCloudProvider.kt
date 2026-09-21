@@ -410,9 +410,27 @@ val raw: List<AioMeta> = if (isStreaming) {
                                          }
                                        callback.invoke(link)
                                        emittedCount.incrementAndGet()
-                                       HostHealth.recordSuccess("febbox.local")
-                                   }
-                                   else -> {
+                                           HostHealth.recordSuccess("febbox.local")
+                                      }
+                                      "MLSBD" -> {
+                                     // MLSBD already resolved to a direct stream URL from player.php
+                                     // or a direct R2 download URL — emit it, don't try to resolve.
+                                     val linkType = when {
+                                         m.url.contains(".m3u8", true) -> ExtractorLinkType.M3U8
+                                         m.url.contains(".mpd", true) -> ExtractorLinkType.DASH
+                                         else -> ExtractorLinkType.VIDEO
+                                     }
+                                     val display = "$emoji${m.quality} •${m.mirror}"
+                                     BCLog.d("MLSBD link: $display")
+                                     callback.invoke(
+                                         newExtractorLink("MLSBD", display, m.url, linkType) {
+                                             this.referer = "https://new.multicloudlinks.com/"
+                                         }
+                                     )
+                                     emittedCount.incrementAndGet()
+                                     HostHealth.recordSuccess(host)
+                                    }
+                                    else -> {
                                     val finalUrl = resolveWrapper(m.url)
                                     if (finalUrl == null) {
                                         BCLog.d("unresolved: ${m.mirror}")
