@@ -94,8 +94,13 @@ fun titleMatches(a: String, b: String): Boolean {
         if (tb.size == 1) return sa.startsWith(sb)
         val queryInCandidate = common.size.toFloat() / ta.size
         val candidateInQuery = common.size.toFloat() / tb.size
-        return queryInCandidate >= 0.6f && candidateInQuery >= 0.6f
-}
+       // OR, not AND. If the query is fully contained in the candidate
+       // (typical MLSBD case — search title + massive qualifier tail),
+       // it's a match regardless of how noisy the candidate is.
+       // Same the other direction.
+       return queryInCandidate >= 0.7f || candidateInQuery >= 0.7f
+  
+       }
 
 private val SEASON_MATCH_ALL_TOKENS = listOf(
     "complete series", "all seasons", "season complete", "complete season"
