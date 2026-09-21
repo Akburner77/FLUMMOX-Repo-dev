@@ -1,5 +1,36 @@
 package com.flummox.bingecloud
 
+// ═══════════════════════════════════════════════════════════════
+// ── MLSBD (DISABLED) ──
+//
+// Status: dead file. Not referenced from any active code path.
+// Reason: mlsbd.co routes every external download link through
+// link.bonghd.com → mlsbd.to → mlsbd.co/ (homepage). The bonghd
+// wrapper is a JS-mediated rotating hop that can't be resolved
+// without a full browser per download link.
+//
+// To revive:
+//   1. StreamScrapers.kt — search "MLSBD REVIVE", uncomment block
+//   2. Settings.kt       — search "MLSBD REVIVE", uncomment row
+//                          and entry in the `all` list
+//   3. CloudflareShield.kt — search "MLSBD REVIVE", uncomment
+//                          the "MLSBD" entry in GROUPS
+//   4. If bonghd's encoding changed, update mlsbdDecodeBongHd()
+//   5. Rebuild
+//
+// Verified working (2026-09-21):
+//   ✓ CF solver reaches mlsbd.co and solves the challenge
+//   ✓ Search parses titles correctly
+//   ✓ Title matching against MLSBD's noisy titles works
+//   ✓ Page fetch + section extraction works
+//   ✓ Anchor parsing sees the download links
+//   ✓ bonghd x_data decoder (URL → strip:N → ROT13 → base64)
+//
+// Not working:
+//   ✗ bonghd wrapper redirects to mlsbd.to → mlsbd.co/ (home)
+//     instead of the download page. Anti-automation.
+// ═══════════════════════════════════════════════════════════════
+
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
