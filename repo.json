@@ -1,9 +1,9 @@
 {
-  "name": "FLUMMOX Repo (Dev)",
-  "description": "Dev builds — unstable",
-  "manifestVersion": 1,
-  "iconUrl": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/icon.png",
-  "pluginLists": [
-    "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/builds-dev/plugins.json"
-  ]
+    "name": "FLUMMOX Repo (Dev)",
+    "description": "Dev builds — unstable",
+    "manifestVersion": 1,
+    "iconUrl": "https://raw.githubusercontent.com/FlummoxGamer/FLUMMOX-Repo/main/icon.png",
+    "pluginLists": [
+        "https://raw.githubusercontent.com/Akburner77/FLUMMOX-Repo-dev/builds-dev/plugins.json"
+    ]
 }
