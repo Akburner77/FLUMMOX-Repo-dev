@@ -15,9 +15,11 @@ object BingeCloudCtx {
     var context: Context? = null
 }
 
+// Must match CfSolverDialog.CF_UA and MlsbdApi.MLSBD_UA exactly —
+// cf_clearance is bound to the UA that solved it.
 private const val CF_UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
 private val CF_INDICATORS = listOf(
     "just a moment",
@@ -67,19 +69,24 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
     val domain = try { URI(url).host ?: "" } catch (_: Exception) { "" }
 
     // ── 1. stored per-domain cookie ──
-    val storedCookie = if (domain.isNotEmpty()) Settings.getCookieForDomain(domain) else null
-    if (!storedCookie.isNullOrBlank()) {
-        try {
-            val res = app.get(
-                url, referer = referer,
-                headers = mapOf("User-Agent" to CF_UA, "Cookie" to storedCookie)
-            )
-            if (res.code in 200..299 && !isCfChallenge(res.text)) {
-                BCLog.d("[CF] stored cookie worked for $domain (${System.currentTimeMillis() - startMs}ms)")
-                return res.text
-            }
-        } catch (_: Exception) {}
+val storedCookie = if (domain.isNotEmpty()) Settings.getCookieForDomain(domain) else null
+if (!storedCookie.isNullOrBlank()) {
+    try {
+        val res = app.get(
+            url, referer = referer,
+            headers = mapOf("User-Agent" to CF_UA, "Cookie" to storedCookie)
+        )
+        if (res.code in 200..299 && !isCfChallenge(res.text)) {
+            BCLog.d("[CF] stored cookie worked for $domain (${System.currentTimeMillis() - startMs}ms)")
+            return res.text
+        }
+        BCLog.d("[CF] stored cookie rejected for $domain (HTTP ${res.code}, cf=${isCfChallenge(res.text)})")
+    } catch (e: Exception) {
+        BCLog.d("[CF] stored cookie threw for $domain: ${e.message}")
     }
+} else {
+    BCLog.d("[CF] no stored cookie for $domain")
+}
 
     // ── 2. plain GET ──
     try {
