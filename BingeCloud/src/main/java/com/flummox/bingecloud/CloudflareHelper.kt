@@ -89,16 +89,26 @@ if (!storedCookie.isNullOrBlank()) {
 }
 
     // ── 2. plain GET ──
+    var shouldSolve = false
     try {
         val res = app.get(url, referer = referer, headers = mapOf("User-Agent" to CF_UA))
         if (res.code in 200..299 && !isCfChallenge(res.text)) {
-            BCLog.d("[CF] plain GET ok for $domain (${System.currentTimeMillis() - startMs}ms)")
-            return res.text
+           BCLog.d("[CF] plain GET ok for $domain (${System.currentTimeMillis() - startMs}ms)")
+           return res.text
         }
         BCLog.d("[CF] plain GET returned ${res.code} for $domain")
-    } catch (e: Exception) {
-        BCLog.d("[CF] plain GET threw for $domain: ${e.message}")
-    }
+       // Only solve on genuine CF signals — not on 500 / 404 / etc.
+       shouldSolve = res.code == 403 || res.code == 503 || isCfChallenge(res.text)
+   } catch (e: Exception) {
+       BCLog.d("[CF] plain GET threw for $domain: ${e.message}")
+       // Network errors, OOM guards, TLS failures — not CF. Do not solve.
+       shouldSolve = false
+   }
+
+   if (!shouldSolve) {
+      BCLog.d("[CF] not a CF challenge for $domain — skipping solver")
+      return null
+   }
 
     // ── 3. interactive solver ──
     return try {
