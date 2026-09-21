@@ -101,9 +101,7 @@ suspend fun cloudflareGet(url: String, referer: String? = null): String? {
             return null
         }
         BCLog.d("[CF] invoking solver for $domain")
-        val result = withContext(Dispatchers.Main) {
-            CfSolverDialog.resolve(activity, url)
-        }
+        val result = CfSolverDialog.resolve(activity, url)
         if (result != null && result.html.isNotBlank()) {
             if (result.cookie.isNotBlank() && domain.isNotEmpty()) {
                 Settings.saveCookieForDomain(domain, result.cookie)
