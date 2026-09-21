@@ -291,12 +291,25 @@ try {
 return url
     }
 
-// ── bonghd.com x_data: URL-decode → ROT13 → base64 → URL ──
+// ── bonghd.com x_data: URL-decode → strip ":N" → ROT13 → base64 → URL ──
+// Verified format: nUE0pUZ6Yl9h...%3D:1
+//   URL-decoded:  nUE0pUZ6Yl9h...=:1
+//   Strip ":1":   nUE0pUZ6Yl9h...=
+//   ROT13:        aHR0cHM6Ly9h...=
+//   base64:       https://...
 private fun mlsbdDecodeBongHd(raw: String): String? {
     return try {
-        val urlDecoded = java.net.URLDecoder.decode(raw, "UTF-8")
-        val rot13 = buildString(urlDecoded.length) {
-            for (c in urlDecoded) {
+        var s = java.net.URLDecoder.decode(raw, "UTF-8")
+
+        // Strip ":N" suffix — the trailing integer is a version marker, not data
+        val colon = s.lastIndexOf(':')
+        if (colon > 0 && s.substring(colon + 1).trim().toIntOrNull() != null) {
+            s = s.substring(0, colon)
+        }
+
+        // ROT13
+        val rot13 = buildString(s.length) {
+            for (c in s) {
                 when {
                     c in 'a'..'z' -> append(((c - 'a' + 13) % 26 + 'a'.code).toChar())
                     c in 'A'..'Z' -> append(((c - 'A' + 13) % 26 + 'A'.code).toChar())
@@ -304,7 +317,10 @@ private fun mlsbdDecodeBongHd(raw: String): String? {
                 }
             }
         }
-        val bytes = android.util.Base64.decode(rot13, android.util.Base64.DEFAULT)
+
+        // Pad to multiple of 4
+        val padded = rot13 + "=".repeat((4 - rot13.length % 4) % 4)
+        val bytes = android.util.Base64.decode(padded, android.util.Base64.DEFAULT)
         String(bytes, Charsets.UTF_8).trim().takeIf { it.startsWith("http") }
     } catch (e: Exception) {
         BCLog.e("[MLSBD] bonghd decode: ${e.message}")
