@@ -261,13 +261,34 @@ private suspend fun mlsbdExtractPlayerStream(playerUrl: String): String? {
     }
     BCLog.d("[MLSBD] player html ${html.length} chars")
     val m = Regex("""const\s+streamSrc\s*=\s*"([^"]+)"""").find(html)
-    val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
-    if (url == null) {
-       BCLog.d("[MLSBD] player: no streamSrc in ${playerUrl.take(60)}")
-    } else {
-       BCLog.d("[MLSBD] player streamSrc FULL: $url")
+val url = m?.groupValues?.get(1)?.takeIf { it.startsWith("http") }
+if (url == null) {
+    BCLog.d("[MLSBD] player: no streamSrc in ${playerUrl.take(60)}")
+    return null
+}
+BCLog.d("[MLSBD] player streamSrc FULL: $url")
+
+// ── probe: what status will ExoPlayer get when it tries this URL? ──
+try {
+    val probeClient = mlsbdHttpClient.newBuilder().followRedirects(false).build()
+    val probeReq = Request.Builder()
+        .url(url)
+        .head()
+        .header("User-Agent", MLSBD_UA)
+        .header("Referer", "https://new.multicloudlinks.com/")
+        .build()
+    val probeResp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        probeClient.newCall(probeReq).execute()
     }
-     return url
+    BCLog.d("[MLSBD] probe code=${probeResp.code} " +
+        "loc=${probeResp.header("Location")?.take(120)} " +
+        "ct=${probeResp.header("Content-Type")} " +
+        "cl=${probeResp.header("Content-Length")}")
+} catch (e: Exception) {
+    BCLog.e("[MLSBD] probe failed: ${e.message}")
+}
+
+return url
     }
 
 suspend fun mlsbdExtractRaw(q: StreamQuery): List<ScrapedMirror> {
